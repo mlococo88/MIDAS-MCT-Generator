@@ -4581,6 +4581,18 @@ function App() {
   const set=(k,v)=>setCfg(p=>({...p,[k]:v}));
   const loadCfg = newCfg => { setCfg({...DEFAULT_CFG,...newCfg}); setSavedMsg('Loaded!'); setTimeout(()=>setSavedMsg(''),2000); };
 
+  // Auto-sync dlc_* combos whenever dead loads change (name, type, add, remove)
+  // Keeps AASHTO presets and custom combos intact — only replaces dlc_* entries
+  const deadLoadsKey = JSON.stringify((cfg.deadLoads||[]).map(d=>({id:d.id,name:d.name,type:d.type,active:d.value>0})));
+  useEffect(()=>{
+    setCfg(prev=>{
+      const currentCombos = prev.loadCombos || [];
+      const freshDL = buildDeadLoadCombos(prev.deadLoads||[]);
+      const kept = currentCombos.filter(c=>!c.id?.startsWith('dlc_'));
+      return {...prev, loadCombos:[...freshDL, ...kept]};
+    });
+  }, [deadLoadsKey]);
+
   useEffect(()=>{
     try{localStorage.setItem('mct_cfg_v2',JSON.stringify(cfg));}catch(e){}
   },[cfg]);
