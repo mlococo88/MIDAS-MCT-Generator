@@ -1194,17 +1194,43 @@ const AASHTO_PRESETS = [
   {id:'str1mn',name:'Strength I (min)',  kind:'STRENGTH',active:false,dcFactor:0.90,dwFactor:0.65,llFactor:1.75,note:'Governs for min effects — uplift, etc.'},
   {id:'str2',  name:'Strength II',       kind:'STRENGTH',active:false,dcFactor:1.25,dwFactor:1.50,llFactor:1.35,note:'Owner-specified permit loads'},
   {id:'str5',  name:'Strength V',        kind:'STRENGTH',active:false,dcFactor:1.25,dwFactor:1.50,llFactor:1.35,note:'With wind on live load'},
-  {id:'svc1',  name:'Service I',         kind:'SERVICE', active:true, dcFactor:1.00,dwFactor:1.00,llFactor:1.00,note:'Deflection, crack control (steel)'},
+  {id:'svc1',  name:'Service I',         kind:'SERVICE', active:false,dcFactor:1.00,dwFactor:1.00,llFactor:1.00,note:'Deflection, crack control (steel)'},
   {id:'svc2',  name:'Service II',        kind:'SERVICE', active:false,dcFactor:1.00,dwFactor:1.00,llFactor:1.30,note:'Steel yielding under LL+I'},
   {id:'fat1',  name:'Fatigue I (LL)',    kind:'FATIGUE', active:false,dcFactor:0.00,dwFactor:0.00,llFactor:1.50,note:'Written as SERVICE in MCT — use MIDAS Fatigue Analysis for full fatigue check'},
   {id:'fat2',  name:'Fatigue II (LL)',   kind:'FATIGUE', active:false,dcFactor:0.00,dwFactor:0.00,llFactor:0.75,note:'Written as SERVICE in MCT — use MIDAS Fatigue Analysis for full fatigue check'},
 ];
 
+// Build individual dead-load passthrough combos from the deadLoads array.
+// Each dead load case gets its own combo with factor = 1.0 so MIDAS outputs
+// those forces separately for use in post-processing combinations.
+function buildDeadLoadCombos(deadLoads) {
+  return (deadLoads||[]).map((d,i)=>({
+    id: 'dlc_'+d.id,
+    name: d.name,
+    kind: 'SERVICE',
+    active: true,
+    note: `${d.type} individual load case — factor 1.0`,
+    terms: [{
+      lc: d.name,
+      type: 'ST',
+      factor: 1,
+      _key: 'dlc_'+d.id+'_t0',
+    }],
+  }));
+}
+
+function buildDefaultCombos(deadLoads) {
+  return [
+    ...buildDeadLoadCombos(deadLoads),
+    ...AASHTO_PRESETS.map(p=>({...p})),
+  ];
+}
+
 function StepCombos({cfg,set}) {
-  const combos = cfg.loadCombos && cfg.loadCombos.length ? cfg.loadCombos : AASHTO_PRESETS.map(p=>({...p}));
+  const combos = cfg.loadCombos && cfg.loadCombos.length ? cfg.loadCombos : buildDefaultCombos(cfg.deadLoads||[]);
   const setCombos = v => set('loadCombos', v);
   const update = (id,field,val) => setCombos(combos.map(c=>c.id===id?{...c,[field]:val}:c));
-  const reset = () => setCombos(AASHTO_PRESETS.map(p=>({...p})));
+  const reset = () => setCombos(buildDefaultCombos(cfg.deadLoads||[]));
   const activeCount = combos.filter(c=>c.active).length;
 
   const KIND_COLORS = {STRENGTH:'#dc2626', SERVICE:'#1d4ed8', FATIGUE:'#7c3aed'};
@@ -1229,69 +1255,60 @@ function StepCombos({cfg,set}) {
   });
   const allAvailable = [...availableST, ...availableMV];
 
-  // Helpers for term-based combos
-  const addTerm = (id) => setCombos(combos.map(c=>c.id===id
-    ? {...c, terms:[...(c.terms||[]), {lc:'', factor:1, type:'ST'}]}
+  // Helpers for term-based combos — all use functional updates to avoid stale closure issues
+  const addTerm = (id) => setCombos(prev=>prev.map(c=>c.id===id
+    ? {...c, terms:[...(c.terms||[]), {lc:'', factor:1, type:'ST', _key:Date.now().toString(36)+Math.random().toString(36).slice(2)}]}
     : c));
-  const removeTerm = (id,ti) => setCombos(combos.map(c=>c.id===id
-    ? {...c, terms:(c.terms||[]).filter((_,i)=>i!==ti)}
+  const removeTerm = (id,key) => setCombos(prev=>prev.map(c=>c.id===id
+    ? {...c, terms:(c.terms||[]).filter(t=>t._key!==key)}
     : c));
-  const updateTerm = (id,ti,field,val) => setCombos(combos.map(c=>c.id===id
-    ? {...c, terms:(c.terms||[]).map((t,i)=>i===ti?{...t,[field]:val}:t)}
+  // Atomic update: update lc AND type in one operation, no stale reads
+  const updateTermLC = (id,key,lc,type) => setCombos(prev=>prev.map(c=>c.id===id
+    ? {...c, terms:(c.terms||[]).map(t=>t._key===key?{...t,lc,type}:t)}
+    : c));
+  const updateTermFactor = (id,key,factor) => setCombos(prev=>prev.map(c=>c.id===id
+    ? {...c, terms:(c.terms||[]).map(t=>t._key===key?{...t,factor}:t)}
     : c));
   const expandCombo = (id) => {
-    // Convert factor-based combo to term-based, pre-filling from its DC/DW/LL factors
-    setCombos(combos.map(c=>{
+    setCombos(prev=>prev.map(c=>{
       if (c.id!==id) return c;
-      if (c.terms) return c; // already expanded
+      if (c.terms) return c;
       const dcF=+(c.dcFactor??1), dwF=+(c.dwFactor??1), llF=+(c.llFactor??1);
       const terms = [
-        ...availableST.map(({lc,cat})=>({lc, type:'ST', factor:cat==='DW'?dwF:dcF})),
-        ...availableMV.map(({lc})=>({lc, type:'MV', factor:llF})),
+        ...availableST.map(({lc,cat})=>({lc, type:'ST', factor:cat==='DW'?dwF:dcF, _key:Math.random().toString(36).slice(2)})),
+        ...availableMV.map(({lc})=>({lc, type:'MV', factor:llF, _key:Math.random().toString(36).slice(2)})),
       ].filter(t=>t.factor!==0);
       return {...c, terms};
     }));
   };
   const collapseCombo = (id) => {
-    // Remove terms, go back to simple factor mode
-    setCombos(combos.map(c=>c.id===id ? {...c, terms:undefined} : c));
+    setCombos(prev=>prev.map(c=>c.id===id ? {...c, terms:undefined} : c));
   };
-  const addCustom = () => setCombos([...combos, {
+  const addCustom = () => setCombos(prev=>[...prev, {
     id:'u'+Date.now(), name:'Custom Combo', kind:'SERVICE', active:true,
-    note:'', terms:[],  // start in term mode
+    note:'', terms:[],
   }]);
-  // Quick fill term helpers
-  const fillAllDC = (id,factor) => {
-    const existing = combos.find(c=>c.id===id)?.terms||[];
-    const newTerms = availableST.filter(({cat})=>cat==='DC').map(({lc})=>({lc,type:'ST',factor}));
-    const merged = [...existing.filter(t=>!newTerms.some(n=>n.lc===t.lc)), ...newTerms];
-    setCombos(combos.map(c=>c.id===id?{...c,terms:merged}:c));
-  };
-  const fillAllDW = (id,factor) => {
-    const existing = combos.find(c=>c.id===id)?.terms||[];
-    const newTerms = availableST.filter(({cat})=>cat==='DW').map(({lc})=>({lc,type:'ST',factor}));
-    const merged = [...existing.filter(t=>!newTerms.some(n=>n.lc===t.lc)), ...newTerms];
-    setCombos(combos.map(c=>c.id===id?{...c,terms:merged}:c));
-  };
-  const fillAllLL = (id,factor) => {
-    const existing = combos.find(c=>c.id===id)?.terms||[];
-    const newTerms = availableMV.map(({lc})=>({lc,type:'MV',factor}));
-    const merged = [...existing.filter(t=>!newTerms.some(n=>n.lc===t.lc)), ...newTerms];
-    setCombos(combos.map(c=>c.id===id?{...c,terms:merged}:c));
-  };
+  // Quick fill term helpers — also functional to avoid stale reads
+  const fillAllDC = (id,factor) => setCombos(prev=>prev.map(c=>{
+    if (c.id!==id) return c;
+    const existing=(c.terms||[]).filter(t=>!availableST.filter(a=>a.cat==='DC').some(a=>a.lc===t.lc));
+    const newTerms=availableST.filter(a=>a.cat==='DC').map(({lc})=>({lc,type:'ST',factor,_key:Math.random().toString(36).slice(2)}));
+    return {...c,terms:[...existing,...newTerms]};
+  }));
+  const fillAllDW = (id,factor) => setCombos(prev=>prev.map(c=>{
+    if (c.id!==id) return c;
+    const existing=(c.terms||[]).filter(t=>!availableST.filter(a=>a.cat==='DW').some(a=>a.lc===t.lc));
+    const newTerms=availableST.filter(a=>a.cat==='DW').map(({lc})=>({lc,type:'ST',factor,_key:Math.random().toString(36).slice(2)}));
+    return {...c,terms:[...existing,...newTerms]};
+  }));
+  const fillAllLL = (id,factor) => setCombos(prev=>prev.map(c=>{
+    if (c.id!==id) return c;
+    const existing=(c.terms||[]).filter(t=>!availableMV.some(a=>a.lc===t.lc));
+    const newTerms=availableMV.map(({lc})=>({lc,type:'MV',factor,_key:Math.random().toString(36).slice(2)}));
+    return {...c,terms:[...existing,...newTerms]};
+  }));
 
-  return (<div>
-    <StepHeader icon="🔗" title="Load Combinations" sub="Writes *LOADCOMB blocks into the MCT file"/>
-    <div style={{marginBottom:'14px'}}>
-      <InfoBox>
-        <strong>{activeCount}</strong> active combination{activeCount!==1?'s':''} will be written to the MCT file.
-        AASHTO presets use global γ_DC / γ_DW / γ_LL factors. Click <strong>⊞ Expand</strong> or add a <strong>Custom Combo</strong>
-        to select individual load cases with per-case factors.
-      </InfoBox>
-    </div>
-
-    <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'12px'}}>
-      {combos.map((c,i)=>{
+  const renderCombo = (c,i) => {
         const col = KIND_COLORS[c.kind]||'#6b7280';
         const isExpanded = Array.isArray(c.terms);
         return (
@@ -1396,15 +1413,17 @@ function StepCombos({cfg,set}) {
                       <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
                     </div>
                   )}
-                  {(c.terms||[]).map((term,ti)=>{
+                  {(c.terms||[]).map((term)=>{
+                    const key = term._key || term.lc || Math.random().toString(36);
                     const avail = allAvailable.find(a=>a.lc===term.lc);
                     const catColor = avail?.cat==='DC'?'#1d4ed8':avail?.cat==='DW'?'#d97706':'#059669';
                     return (
-                      <div key={ti} style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',alignItems:'center'}}>
-                        <select value={term.lc} onChange={e=>{
-                            const found=allAvailable.find(a=>a.lc===e.target.value);
-                            updateTerm(c.id,ti,'lc',e.target.value);
-                            updateTerm(c.id,ti,'type',found?.cat==='LL'?'MV':'ST');
+                      <div key={key} style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',alignItems:'center'}}>
+                        <select value={term.lc}
+                          onChange={e=>{
+                            const found = allAvailable.find(a=>a.lc===e.target.value);
+                            const newType = found?.cat==='LL' ? 'MV' : 'ST';
+                            updateTermLC(c.id, key, e.target.value, newType);
                           }}
                           style={{...INP2,padding:'5px 8px',fontSize:'12px',
                             borderColor:term.lc?catColor+'40':'#e5e7eb',
@@ -1424,10 +1443,10 @@ function StepCombos({cfg,set}) {
                           </optgroup>
                         </select>
                         <input type="number" step="0.05" value={term.factor}
-                          onChange={e=>updateTerm(c.id,ti,'factor',parseFloat(e.target.value)||0)}
+                          onChange={e=>updateTermFactor(c.id, key, parseFloat(e.target.value)||0)}
                           style={{...INP2,textAlign:'right',fontFamily:'monospace',fontWeight:'600',fontSize:'12px',
                             color:term.factor<0?'#dc2626':term.factor===0?'#9ca3af':'#059669'}}/>
-                        <button onClick={()=>removeTerm(c.id,ti)}
+                        <button onClick={()=>removeTerm(c.id, key)}
                           style={{background:'none',border:'none',color:'#d1d5db',cursor:'pointer',fontSize:'15px',padding:'0',lineHeight:1}}
                           onMouseEnter={e=>e.target.style.color='#dc2626'} onMouseLeave={e=>e.target.style.color='#d1d5db'}>×</button>
                       </div>
@@ -1449,15 +1468,66 @@ function StepCombos({cfg,set}) {
             )}
           </div>
         );
-      })}
+  };
+
+  return (<div>
+    <StepHeader icon="🔗" title="Load Combinations" sub="Writes *LOADCOMB blocks into the MCT file"/>
+    <div style={{marginBottom:'14px'}}>
+      <InfoBox>
+        <strong>{activeCount}</strong> active combination{activeCount!==1?'s':''} will be written to the MCT file.
+        AASHTO presets use global γ_DC / γ_DW / γ_LL factors. Click <strong>⊞ Expand</strong> or add a <strong>Custom Combo</strong>
+        to select individual load cases with per-case factors.
+      </InfoBox>
+    </div>
+
+    <div style={{display:'flex',flexDirection:'column',gap:'8px',marginBottom:'12px'}}>
+      {/* Section label: dead load passthrough combos */}
+      {combos.some(c=>c.id?.startsWith('dlc_'))&&(
+        <div style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',
+          letterSpacing:'0.07em',paddingLeft:'4px',paddingBottom:'2px',borderBottom:'1px solid #f3f4f6'}}>
+          Dead Load Cases (passthrough — from Step 4)
+        </div>
+      )}
+      {combos.filter(c=>c.id?.startsWith('dlc_')).map((c,i)=>renderCombo(c,i))}
+
+      {/* Section label: AASHTO + custom combos */}
+      {combos.some(c=>!c.id?.startsWith('dlc_'))&&(
+        <div style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',
+          letterSpacing:'0.07em',paddingLeft:'4px',paddingBottom:'2px',borderBottom:'1px solid #f3f4f6',marginTop:'4px'}}>
+          AASHTO Combinations &amp; Custom
+        </div>
+      )}
+      {combos.filter(c=>!c.id?.startsWith('dlc_')).map((c,i)=>renderCombo(c,i))}
+    </div>
     </div>
 
     {/* Toolbar */}
     <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
       <button onClick={addCustom} style={{background:'#1d4ed8',border:'none',borderRadius:'5px',
         color:'#fff',padding:'7px 16px',cursor:'pointer',fontSize:'12.5px',fontWeight:'600'}}>+ Custom Combo</button>
-      <button onClick={reset} style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',
-        color:'#6b7280',padding:'6px 14px',cursor:'pointer',fontSize:'12px'}}>↺ Reset to AASHTO Defaults</button>
+      <button onClick={()=>{
+          // Sync: rebuild dead-load passthrough combos from current Step 4 names.
+          // Updates name/terms on existing DL combos; adds any new ones; leaves AASHTO/custom combos intact.
+          const freshDL = buildDeadLoadCombos(cfg.deadLoads||[]);
+          const freshIds = new Set(freshDL.map(f=>f.id));
+          const updatedExisting = combos.map(c=>{
+            const fresh = freshDL.find(f=>f.id===c.id);
+            return fresh ? {...c, name:fresh.name, terms:fresh.terms} : c;
+          });
+          const newOnes = freshDL.filter(f=>!combos.some(c=>c.id===f.id));
+          setCombos([...updatedExisting, ...newOnes]);
+        }}
+        title="Re-generate one passthrough combo per dead load from Step 4 — keeps AASHTO presets and custom combos"
+        style={{background:'#fff',border:'1px solid #bfdbfe',borderRadius:'5px',
+          color:'#1d4ed8',padding:'6px 14px',cursor:'pointer',fontSize:'12px'}}>
+        ↺ Sync Dead Load Combos
+      </button>
+      <button onClick={reset}
+        title="Restore all defaults: dead load combos from Step 4 + AASHTO presets"
+        style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',
+          color:'#6b7280',padding:'6px 14px',cursor:'pointer',fontSize:'12px'}}>
+        ↺ Reset All to Defaults
+      </button>
       <div style={{marginLeft:'auto',fontSize:'10.5px',color:'#9ca3af',fontFamily:'monospace'}}>
         DC = structural dead loads &nbsp;·&nbsp; DW = wearing surface &nbsp;·&nbsp; LL = live load + IM
       </div>
@@ -3813,8 +3883,9 @@ const DEFAULT_CFG = {
   selectedVehicles:['HL-93TRK','HL-93TDM'],
   vehicleDLA:{},useGlobalDLA:false,globalDLA:0,
   laneName:'Suspended Span',laneWidth:10,laneWheelSpacing:6,
-  loadCombos: AASHTO_PRESETS.map(p=>({...p})),
 };
+// loadCombos is computed from deadLoads so it can reference names
+DEFAULT_CFG.loadCombos = buildDefaultCombos(DEFAULT_CFG.deadLoads);
 
 // ── Report Generator ─────────────────────────────────────────────────────────
 function generateReportHTML({ cfg, mctOutput, rows, nodePositions, ratingData,
