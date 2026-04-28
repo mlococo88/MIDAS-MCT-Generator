@@ -1285,21 +1285,24 @@ function StepCombos({cfg,set}) {
   const expandCombo = (id) => {
     setCombos(prev=>prev.map(c=>{
       if (c.id!==id) return c;
-      if (c.terms) return c;
+      // If already has terms, just show them
+      if (Array.isArray(c.terms) && c.terms.length > 0) return {...c, _expanded:true};
+      // Pre-fill from factors only when no terms exist yet
       const dcF=+(c.dcFactor??1), dwF=+(c.dwFactor??1), llF=+(c.llFactor??1);
       const terms = [
         ...availableST.map(({lc,cat})=>({lc, type:'ST', factor:cat==='DW'?dwF:dcF, _key:Math.random().toString(36).slice(2)})),
         ...availableMV.map(({lc})=>({lc, type:'MV', factor:llF, _key:Math.random().toString(36).slice(2)})),
       ].filter(t=>t.factor!==0);
-      return {...c, terms};
+      return {...c, terms, _expanded:true};
     }));
   };
   const collapseCombo = (id) => {
-    setCombos(prev=>prev.map(c=>c.id===id ? {...c, terms:undefined} : c));
+    // Never destroy terms — just hide the editor
+    setCombos(prev=>prev.map(c=>c.id===id ? {...c, _expanded:false} : c));
   };
   const addCustom = () => setCombos(prev=>[...prev, {
     id:'u'+Date.now(), name:'Custom Combo', kind:'SERVICE', active:true,
-    note:'', terms:[],
+    note:'', terms:[], _expanded:true,
   }]);
   // Quick fill term helpers — also functional to avoid stale reads
   const fillAllDC = (id,factor) => setCombos(prev=>prev.map(c=>{
@@ -1323,7 +1326,7 @@ function StepCombos({cfg,set}) {
 
   const renderCombo = (c,i) => {
         const col = KIND_COLORS[c.kind]||'#6b7280';
-        const isExpanded = Array.isArray(c.terms);
+        const isExpanded = c._expanded === true;
         return (
           <div key={c.id} style={{background:'#fff',border:`1px solid ${isExpanded?col+'50':'#e5e7eb'}`,
             borderRadius:'8px',overflow:'hidden',opacity:c.active?1:0.6,
