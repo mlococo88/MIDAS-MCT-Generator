@@ -938,9 +938,10 @@ function StepLoads({cfg,set}) {
 
       {deadLoads.map((d,i)=>{
         const isActive = d.value>0;
-        const typeColor = d.type==='DW'?'#d97706':d.type==='DC2'?'#7c3aed':'#1d4ed8';
-        const typeBg   = d.type==='DW'?'#fef3c7':d.type==='DC2'?'#f5f3ff':'#dbeafe';
-        const typeText = d.type==='DW'?'#92400e':d.type==='DC2'?'#5b21b6':'#1e40af';
+        const effectiveType = d.type==='DC' ? 'DC1' : d.type;
+        const typeColor = effectiveType==='DW'?'#d97706':effectiveType==='DC2'?'#7c3aed':'#1d4ed8';
+        const typeBg   = effectiveType==='DW'?'#fef3c7':effectiveType==='DC2'?'#f5f3ff':'#dbeafe';
+        const typeText = effectiveType==='DW'?'#92400e':effectiveType==='DC2'?'#5b21b6':'#1e40af';
         return (
           <div key={d.id} style={{display:'grid',gridTemplateColumns:'24px 24px 1fr 80px 100px 80px',
             alignItems:'center',padding:'8px 12px',borderBottom:'1px solid #f3f4f6',gap:'6px',
@@ -962,7 +963,7 @@ function StepLoads({cfg,set}) {
               title="This name is used verbatim in the MCT *STLDCASE block"/>
             {/* Type */}
             <div style={{textAlign:'center'}}>
-              <select value={d.type} onChange={e=>updateLoad(d.id,'type',e.target.value)}
+              <select value={d.type==='DC'?'DC1':d.type} onChange={e=>updateLoad(d.id,'type',e.target.value)}
                 style={{...INP2,padding:'4px 6px',fontSize:'11px',fontWeight:'700',
                   color:typeText,background:typeBg,border:`1px solid ${typeColor}40`,width:'70px',textAlign:'center'}}>
                 <option value="DC1">DC1</option>
@@ -1208,11 +1209,11 @@ const AASHTO_PRESETS = [
 // those forces separately for use in post-processing combinations.
 function buildDeadLoadCombos(deadLoads) {
   const all = deadLoads||[];
-  // Include ALL loads of each type — even value=0 (user may add value later)
-  const dc1Loads = all.filter(d=>d.type==='DC1');
+  // Legacy 'DC' (undifferentiated) is treated as DC1
+  const dc1Loads = all.filter(d=>d.type==='DC1' || d.type==='DC');
   const dc2Loads = all.filter(d=>d.type==='DC2');
   const dwLoads  = all.filter(d=>d.type==='DW');
-  const dcLoads  = all.filter(d=>d.type!=='DW'); // DC1 + DC2 combined
+  const dcLoads  = all.filter(d=>d.type!=='DW'); // DC1 + DC2 + legacy DC
 
   const makeCombo = (id, name, loads, note) => ({
     id,
@@ -4724,17 +4725,18 @@ function SavesModal({ cfg, onLoad, onClose,
 function App() {
   const [step,setStep]=useState(0);
   const [cfg,setCfg]=useState(()=>{
+    const migrateDC = cfg => {
+      // Remap any legacy type:'DC' loads to 'DC1'
+      if (!cfg.deadLoads) return cfg;
+      const deadLoads = cfg.deadLoads.map(d=>d.type==='DC'?{...d,type:'DC1'}:d);
+      return {...cfg, deadLoads, loadCombos: buildDefaultCombos(deadLoads)};
+    };
     try{
       const s=localStorage.getItem('mct_cfg_v3');
-      if(s) return {...DEFAULT_CFG,...JSON.parse(s)};
-      // Migrate from v2 — carry over everything except loadCombos (rebuilt from deadLoads)
+      if(s) return migrateDC({...DEFAULT_CFG,...JSON.parse(s)});
+      // Migrate from v2
       const v2=localStorage.getItem('mct_cfg_v2');
-      if(v2){
-        const old=JSON.parse(v2);
-        const migrated={...DEFAULT_CFG,...old};
-        migrated.loadCombos=buildDefaultCombos(migrated.deadLoads||DEFAULT_CFG.deadLoads);
-        return migrated;
-      }
+      if(v2) return migrateDC({...DEFAULT_CFG,...JSON.parse(v2)});
     }catch(e){}
     return DEFAULT_CFG;
   });
@@ -4757,10 +4759,12 @@ function App() {
   const deadLoadsKey = JSON.stringify((cfg.deadLoads||[]).map(d=>({id:d.id,name:d.name,type:d.type})));
   useEffect(()=>{
     setCfg(prev=>{
+      // Remap any legacy type:'DC' to 'DC1' before rebuilding combos
+      const deadLoads = (prev.deadLoads||[]).map(d=>d.type==='DC'?{...d,type:'DC1'}:d);
       const currentCombos = prev.loadCombos || [];
-      const freshDL = buildDeadLoadCombos(prev.deadLoads||[]);
+      const freshDL = buildDeadLoadCombos(deadLoads);
       const kept = currentCombos.filter(c=>!c.id?.startsWith('dlc_'));
-      return {...prev, loadCombos:[...freshDL, ...kept]};
+      return {...prev, deadLoads, loadCombos:[...freshDL, ...kept]};
     });
   }, [deadLoadsKey]);
 
