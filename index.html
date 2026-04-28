@@ -244,7 +244,8 @@ function generateMCT(cfg) {
   const activeLCs = ['Selfweight', ...deadLoads.map(d=>d.name)];
   p(`*STLDCASE    ; Static Load Cases`,`; LCNAME, LCTYPE, DESC`);
   p(`   Selfweight, DC, `);
-  deadLoads.forEach(d=>p(`   ${d.name}, ${d.type}, `));
+  // MIDAS only accepts DC and DW as LCTYPE — map DC1/DC2 → DC
+  deadLoads.forEach(d=>p(`   ${d.name}, ${d.type==='DW'?'DW':'DC'}, `));
   p(``);
 
   p(`*USE-STLD, Selfweight`,``,`*SELFWEIGHT    ; Self Weight`,`; X, Y, Z, GROUP`,`0, 0, -1, `,``,`; End of data for load case [Selfweight] -------------------------`,``);
@@ -868,24 +869,25 @@ function StepLoads({cfg,set}) {
   const setLoads = v => set('deadLoads', v);
   const uid = () => 'dl'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 
-  const addLoad = () => setLoads([...deadLoads, {id:uid(), name:'New Load Case', type:'DC', value:0}]);
+  const addLoad = () => setLoads([...deadLoads, {id:uid(), name:'New Load Case', type:'DC1', value:0}]);
   const removeLoad = id => setLoads(deadLoads.filter(d=>d.id!==id));
   const updateLoad = (id,field,val) => setLoads(deadLoads.map(d=>d.id===id?{...d,[field]:val}:d));
   const moveUp = i => { if(i===0)return; const a=[...deadLoads]; [a[i-1],a[i]]=[a[i],a[i-1]]; setLoads(a); };
   const moveDown = i => { if(i===deadLoads.length-1)return; const a=[...deadLoads]; [a[i],a[i+1]]=[a[i+1],a[i]]; setLoads(a); };
 
   const total = deadLoads.reduce((s,d)=>s+(d.value||0),0);
-  const totalDC = deadLoads.filter(d=>d.type==='DC').reduce((s,d)=>s+(d.value||0),0);
+  const totalDC1 = deadLoads.filter(d=>d.type==='DC1').reduce((s,d)=>s+(d.value||0),0);
+  const totalDC2 = deadLoads.filter(d=>d.type==='DC2').reduce((s,d)=>s+(d.value||0),0);
   const totalDW = deadLoads.filter(d=>d.type==='DW').reduce((s,d)=>s+(d.value||0),0);
 
   const PRESETS = [
-    {name:'DC1 — Non-composite DL', type:'DC', value:0, hint:'SDL before deck pour (steel, formwork)'},
-    {name:'DC2 — Composite DL',     type:'DC', value:0, hint:'SDL after deck cures (barriers, diaphragms)'},
-    {name:'DW — Wearing Surface',   type:'DW', value:0, hint:'Future overlay or utilities'},
-    {name:'Deck Slab',              type:'DC', value:0, hint:'Concrete deck weight on girder'},
-    {name:'Haunch',                 type:'DC', value:0, hint:'Haunch/fillet concrete above top flange'},
-    {name:'Movable Barrier',        type:'DW', value:0, hint:'Jersey or traffic railing barrier'},
-    {name:'Diaphragm',              type:'DC', value:0, hint:'Diaphragm/cross-frame dead load'},
+    {name:'DC1 — Non-composite DL', type:'DC1', value:0, hint:'SDL before deck pour (steel, formwork)'},
+    {name:'DC2 — Composite DL',     type:'DC2', value:0, hint:'SDL after deck cures (barriers, diaphragms)'},
+    {name:'DW — Wearing Surface',   type:'DW',  value:0, hint:'Future overlay or utilities'},
+    {name:'Deck Slab',              type:'DC1', value:0, hint:'Concrete deck weight on girder'},
+    {name:'Haunch',                 type:'DC1', value:0, hint:'Haunch/fillet concrete above top flange'},
+    {name:'Movable Barrier',        type:'DW',  value:0, hint:'Jersey or traffic railing barrier'},
+    {name:'Diaphragm',              type:'DC2', value:0, hint:'Diaphragm/cross-frame dead load'},
   ];
   const [showPresets, setShowPresets] = useState(false);
 
@@ -936,9 +938,9 @@ function StepLoads({cfg,set}) {
 
       {deadLoads.map((d,i)=>{
         const isActive = d.value>0;
-        const typeColor = d.type==='DW'?'#d97706':'#1d4ed8';
-        const typeBg   = d.type==='DW'?'#fef3c7':'#dbeafe';
-        const typeText = d.type==='DW'?'#92400e':'#1e40af';
+        const typeColor = d.type==='DW'?'#d97706':d.type==='DC2'?'#7c3aed':'#1d4ed8';
+        const typeBg   = d.type==='DW'?'#fef3c7':d.type==='DC2'?'#f5f3ff':'#dbeafe';
+        const typeText = d.type==='DW'?'#92400e':d.type==='DC2'?'#5b21b6':'#1e40af';
         return (
           <div key={d.id} style={{display:'grid',gridTemplateColumns:'24px 24px 1fr 80px 100px 80px',
             alignItems:'center',padding:'8px 12px',borderBottom:'1px solid #f3f4f6',gap:'6px',
@@ -963,7 +965,8 @@ function StepLoads({cfg,set}) {
               <select value={d.type} onChange={e=>updateLoad(d.id,'type',e.target.value)}
                 style={{...INP2,padding:'4px 6px',fontSize:'11px',fontWeight:'700',
                   color:typeText,background:typeBg,border:`1px solid ${typeColor}40`,width:'70px',textAlign:'center'}}>
-                <option value="DC">DC</option>
+                <option value="DC1">DC1</option>
+                <option value="DC2">DC2</option>
                 <option value="DW">DW</option>
               </select>
             </div>
@@ -995,7 +998,7 @@ function StepLoads({cfg,set}) {
         <div style={{fontSize:'11.5px',fontWeight:'600',color:'#374151'}}>
           Total superimposed DL &nbsp;
           <span style={{fontFamily:'monospace',fontWeight:'400',fontSize:'10.5px',color:'#6b7280'}}>
-            (DC: {totalDC.toFixed(4)} + DW: {totalDW.toFixed(4)})
+            (DC1: {totalDC1.toFixed(4)} + DC2: {totalDC2.toFixed(4)} + DW: {totalDW.toFixed(4)})
           </span>
         </div>
         <span/>
@@ -1204,19 +1207,27 @@ const AASHTO_PRESETS = [
 // Each dead load case gets its own combo with factor = 1.0 so MIDAS outputs
 // those forces separately for use in post-processing combinations.
 function buildDeadLoadCombos(deadLoads) {
-  return (deadLoads||[]).map((d,i)=>({
+  const all = deadLoads||[];
+  // One passthrough combo per individual load case
+  const individual = all.map(d=>({
     id: 'dlc_'+d.id,
     name: d.name,
     kind: 'SERVICE',
     active: true,
     note: `${d.type} individual load case — factor 1.0`,
-    terms: [{
-      lc: d.name,
-      type: 'ST',
-      factor: 1,
-      _key: 'dlc_'+d.id+'_t0',
-    }],
+    terms: [{ lc:d.name, type:'ST', factor:1, _key:'dlc_'+d.id+'_t0' }],
   }));
+  // "DC" grouped combo = all DC1 + DC2 loads at factor 1.0
+  const dcLoads = all.filter(d=>d.type!=='DW');
+  const dcAllCombo = dcLoads.length > 0 ? [{
+    id: 'dlc_dc_all',
+    name: 'DC',
+    kind: 'SERVICE',
+    active: true,
+    note: 'All DC structural dead loads combined — factor 1.0',
+    terms: dcLoads.map(d=>({ lc:d.name, type:'ST', factor:1, _key:'dlc_dc_all_'+d.id })),
+  }] : [];
+  return [...individual, ...dcAllCombo];
 }
 
 function buildDefaultCombos(deadLoads) {
@@ -1239,7 +1250,7 @@ function StepCombos({cfg,set}) {
 
   // Build the available load cases from current cfg — matches what generateMCT will produce
   const deadLoadsST = (cfg.deadLoads && cfg.deadLoads.length)
-    ? cfg.deadLoads.filter(d=>d.value>0).map(d=>({lc:d.name, label:d.name, cat:d.type}))
+    ? cfg.deadLoads.filter(d=>d.value>0).map(d=>({lc:d.name, label:d.name, cat:d.type==='DW'?'DW':'DC'}))
     : (() => {
         // Migration: fall back to legacy fields
         const DLL = cfg.deadLoadLabels||{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'};
@@ -1487,7 +1498,7 @@ function StepCombos({cfg,set}) {
       {combos.some(c=>c.id?.startsWith('dlc_'))&&(
         <div style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',
           letterSpacing:'0.07em',paddingLeft:'4px',paddingBottom:'2px',borderBottom:'1px solid #f3f4f6'}}>
-          Dead Load Cases (passthrough — from Step 4)
+          Dead Load Cases — individual (DC1, DC2, DW) + combined (DC)
         </div>
       )}
       {combos.filter(c=>c.id?.startsWith('dlc_')).map((c,i)=>renderCombo(c,i))}
@@ -3876,9 +3887,9 @@ const DEFAULT_CFG = {
   deckSlabLoad:0.738281,haunchLoad:0.0085625,barrierLoad:0.465,diaphragmLoad:0,
   deadLoadLabels:{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'},
   deadLoads:[
-    {id:'dl1',name:'DC1 — Non-composite DL',type:'DC',value:0.738281},
-    {id:'dl2',name:'DC2 — Composite DL',    type:'DC',value:0.0085625},
-    {id:'dl3',name:'DW — Barrier/Overlay',  type:'DW',value:0.465},
+    {id:'dl1',name:'DC1 — Non-composite DL',type:'DC1',value:0.738281},
+    {id:'dl2',name:'DC2 — Composite DL',    type:'DC2',value:0.0085625},
+    {id:'dl3',name:'DW — Barrier/Overlay',  type:'DW', value:0.465},
   ],
   movingLoadCode:'AASHTO LRFD',
   selectedVehicles:['HL-93TRK','HL-93TDM'],
