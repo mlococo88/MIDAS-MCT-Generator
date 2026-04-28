@@ -1208,10 +1208,11 @@ const AASHTO_PRESETS = [
 // those forces separately for use in post-processing combinations.
 function buildDeadLoadCombos(deadLoads) {
   const all = deadLoads||[];
-  const dc1Loads = all.filter(d=>d.type==='DC1' && d.value>0);
-  const dc2Loads = all.filter(d=>d.type==='DC2' && d.value>0);
-  const dwLoads  = all.filter(d=>d.type==='DW'  && d.value>0);
-  const dcLoads  = all.filter(d=>d.type!=='DW'  && d.value>0); // DC1 + DC2
+  // Include ALL loads of each type — even value=0 (user may add value later)
+  const dc1Loads = all.filter(d=>d.type==='DC1');
+  const dc2Loads = all.filter(d=>d.type==='DC2');
+  const dwLoads  = all.filter(d=>d.type==='DW');
+  const dcLoads  = all.filter(d=>d.type!=='DW'); // DC1 + DC2 combined
 
   const makeCombo = (id, name, loads, note) => ({
     id,
@@ -1250,7 +1251,7 @@ function StepCombos({cfg,set}) {
 
   // Build the available load cases from current cfg — matches what generateMCT will produce
   const deadLoadsST = (cfg.deadLoads && cfg.deadLoads.length)
-    ? cfg.deadLoads.filter(d=>d.value>0).map(d=>({lc:d.name, label:d.name, cat:d.type==='DW'?'DW':'DC'}))
+    ? cfg.deadLoads.map(d=>({lc:d.name, label:d.name, cat:d.type==='DW'?'DW':'DC'}))
     : (() => {
         // Migration: fall back to legacy fields
         const DLL = cfg.deadLoadLabels||{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'};
@@ -1329,14 +1330,16 @@ function StepCombos({cfg,set}) {
         const isExpanded = c._expanded === true;
         const isDLCombo = c.id?.startsWith('dlc_');
 
-        // ── Read-only compact card for auto-managed DL combos ──
+        // ── Compact card for auto-managed DL combos (expandable for editing) ──
         if (isDLCombo) {
           const typeColor = c.id==='dlc_dw'?'#d97706':c.id==='dlc_dc2'?'#7c3aed':'#1d4ed8';
           const typeText  = c.id==='dlc_dw'?'DW':c.id==='dlc_dc2'?'DC2':c.id==='dlc_dc1'?'DC1':'DC';
           return (
             <div key={c.id} style={{background:'#fff',borderRadius:'8px',overflow:'hidden',
-              border:`1px solid ${c.active?typeColor+'30':'#e5e7eb'}`,
+              border:`1px solid ${isExpanded?typeColor+'50':c.active?typeColor+'30':'#e5e7eb'}`,
               borderLeft:`4px solid ${c.active?typeColor:'#e5e7eb'}`,opacity:c.active?1:0.6}}>
+
+              {/* Header row */}
               <div style={{display:'flex',alignItems:'center',gap:'8px',padding:'9px 14px',flexWrap:'wrap'}}>
                 <input type="checkbox" checked={c.active} onChange={e=>update(c.id,'active',e.target.checked)}
                   style={{accentColor:'#1d4ed8',width:'15px',height:'15px',cursor:'pointer',flexShrink:0}}/>
@@ -1349,26 +1352,133 @@ function StepCombos({cfg,set}) {
                 <span style={{fontSize:'13px',fontWeight:'600',color:c.active?'#111827':'#9ca3af',flex:1}}>
                   {c.name}
                 </span>
-                {/* Terms inline */}
-                <div style={{display:'flex',gap:'5px',flexWrap:'wrap',flex:'2',minWidth:'120px'}}>
-                  {(c.terms||[]).filter(t=>t.lc).map((t,ti)=>(
-                    <span key={ti} style={{fontSize:'10.5px',fontFamily:'monospace',
-                      background:'#f3f4f6',color:'#374151',padding:'2px 8px',borderRadius:'4px',
-                      border:'1px solid #e5e7eb'}}>
-                      {t.lc} <span style={{color:'#9ca3af'}}>× {t.factor}</span>
-                    </span>
-                  ))}
-                  {(!c.terms||c.terms.length===0)&&(
-                    <span style={{fontSize:'10.5px',fontFamily:'monospace',color:'#d1d5db',fontStyle:'italic'}}>
-                      no loads of this type (add in Step 4)
-                    </span>
-                  )}
-                </div>
-                {/* Auto badge */}
+                {/* Collapsed: terms as chips */}
+                {!isExpanded&&(
+                  <div style={{display:'flex',gap:'5px',flexWrap:'wrap',flex:'2',minWidth:'120px'}}>
+                    {(c.terms||[]).filter(t=>t.lc).map((t,ti)=>(
+                      <span key={ti} style={{fontSize:'10.5px',fontFamily:'monospace',
+                        background:'#f3f4f6',color:'#374151',padding:'2px 8px',borderRadius:'4px',
+                        border:'1px solid #e5e7eb'}}>
+                        {t.lc} <span style={{color:'#9ca3af'}}>×{t.factor}</span>
+                      </span>
+                    ))}
+                    {(!c.terms||c.terms.length===0)&&(
+                      <span style={{fontSize:'10.5px',fontFamily:'monospace',color:'#d1d5db',fontStyle:'italic'}}>
+                        no loads of this type yet
+                      </span>
+                    )}
+                  </div>
+                )}
+                {/* Edit / Collapse button */}
+                <button onClick={()=>isExpanded?collapseCombo(c.id):expandCombo(c.id)}
+                  style={{background:isExpanded?typeColor+'18':'#f9fafb',
+                    border:`1px solid ${isExpanded?typeColor+'40':'#e5e7eb'}`,
+                    borderRadius:'5px',color:isExpanded?typeColor:'#6b7280',
+                    padding:'4px 9px',cursor:'pointer',fontSize:'11px',fontWeight:'600',flexShrink:0}}>
+                  {isExpanded?'⊟ Done':'✏ Edit'}
+                </button>
                 <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',
                   background:'#f3f4f6',padding:'2px 7px',borderRadius:'99px',flexShrink:0,
                   border:'1px solid #e5e7eb'}}>auto</span>
               </div>
+
+              {/* Expanded: full term editor (same as custom combos) */}
+              {isExpanded&&(
+                <div style={{padding:'10px 14px',borderTop:'1px solid #f3f4f6',background:'#fafbff'}}>
+                  <div style={{fontSize:'10.5px',color:'#6b7280',fontFamily:'monospace',marginBottom:'10px',
+                    padding:'6px 10px',background:'#fffbeb',borderRadius:'4px',border:'1px solid #fde68a'}}>
+                    ⚠ This combo is auto-managed from Step 4. Changes here will persist but will be
+                    overwritten if you click "Sync Dead Load Combos" or "Reset All to Defaults".
+                  </div>
+                  <div style={{display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'10px',alignItems:'center'}}>
+                    <span style={{fontSize:'10px',color:'#9ca3af',fontFamily:'monospace'}}>Quick add:</span>
+                    {availableST.filter(({cat})=>cat==='DC').length>0&&(
+                      <button onClick={()=>fillAllDC(c.id,1)}
+                        style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',
+                          color:'#1d4ed8',padding:'3px 9px',cursor:'pointer',fontSize:'10.5px'}}>
+                        All DC × 1.0
+                      </button>
+                    )}
+                    {availableST.filter(({cat})=>cat==='DW').length>0&&(
+                      <button onClick={()=>fillAllDW(c.id,1)}
+                        style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:'4px',
+                          color:'#92400e',padding:'3px 9px',cursor:'pointer',fontSize:'10.5px'}}>
+                        All DW × 1.0
+                      </button>
+                    )}
+                    <button onClick={()=>addTerm(c.id)}
+                      style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'4px',
+                        color:'#374151',padding:'3px 9px',cursor:'pointer',fontSize:'10.5px',marginLeft:'auto'}}>
+                      + Add Term
+                    </button>
+                  </div>
+
+                  {(!c.terms||c.terms.length===0)&&(
+                    <div style={{padding:'12px',textAlign:'center',color:'#9ca3af',fontSize:'11.5px',
+                      background:'#f9fafb',borderRadius:'5px',border:'1px dashed #e5e7eb'}}>
+                      No terms. Click "+ Add Term" or use Quick Add.
+                    </div>
+                  )}
+
+                  <div style={{display:'flex',flexDirection:'column',gap:'4px'}}>
+                    {c.terms?.length>0&&(
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',
+                        padding:'0 4px',fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',
+                        textTransform:'uppercase',letterSpacing:'0.06em'}}>
+                        <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
+                      </div>
+                    )}
+                    {(c.terms||[]).map((term)=>{
+                      const key = term._key || term.lc || Math.random().toString(36);
+                      const avail = allAvailable.find(a=>a.lc===term.lc);
+                      const catColor = avail?.cat==='DC'?'#1d4ed8':avail?.cat==='DW'?'#d97706':'#059669';
+                      return (
+                        <div key={key} style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',alignItems:'center'}}>
+                          <select value={term.lc}
+                            onChange={e=>{
+                              const found=allAvailable.find(a=>a.lc===e.target.value);
+                              updateTermLC(c.id,key,e.target.value,found?.cat==='LL'?'MV':'ST');
+                            }}
+                            style={{...INP2,padding:'5px 8px',fontSize:'12px',
+                              borderColor:term.lc?catColor+'40':'#e5e7eb',
+                              background:term.lc?catColor+'06':'#fff'}}>
+                            <option value="">— select load case —</option>
+                            <optgroup label="Dead Load DC (structural)">
+                              {availableST.filter(({cat})=>cat==='DC').map(({lc,label})=>
+                                <option key={lc} value={lc}>{label}</option>)}
+                            </optgroup>
+                            <optgroup label="Dead Load DW (wearing surface)">
+                              {availableST.filter(({cat})=>cat==='DW').map(({lc,label})=>
+                                <option key={lc} value={lc}>{label}</option>)}
+                            </optgroup>
+                            <optgroup label="Live Load (Moving)">
+                              {availableMV.map(({lc,label})=>
+                                <option key={lc} value={lc}>{label}</option>)}
+                            </optgroup>
+                          </select>
+                          <input type="number" step="0.05" value={term.factor}
+                            onChange={e=>updateTermFactor(c.id,key,parseFloat(e.target.value)||0)}
+                            style={{...INP2,textAlign:'right',fontFamily:'monospace',fontWeight:'600',fontSize:'12px',
+                              color:term.factor<0?'#dc2626':term.factor===0?'#9ca3af':'#059669'}}/>
+                          <button onClick={()=>removeTerm(c.id,key)}
+                            style={{background:'none',border:'none',color:'#d1d5db',cursor:'pointer',fontSize:'15px',padding:'0',lineHeight:1}}
+                            onMouseEnter={e=>e.target.style.color='#dc2626'} onMouseLeave={e=>e.target.style.color='#d1d5db'}>×</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {c.terms?.some(t=>t.lc)&&(
+                    <div style={{marginTop:'8px',padding:'6px 10px',background:'#f9fafb',border:'1px solid #e5e7eb',
+                      borderRadius:'4px',fontSize:'10px',fontFamily:'monospace',color:'#6b7280',overflowX:'auto',whiteSpace:'nowrap'}}>
+                      <strong style={{color:'#111827'}}>{c.name}</strong> = {c.terms.filter(t=>t.lc).map(t=>{
+                        const av=allAvailable.find(a=>a.lc===t.lc);
+                        return `${t.factor>=0?'+':''}${t.factor}×[${av?.label||t.lc}]`;
+                      }).join(' ')}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         }
@@ -4614,7 +4724,18 @@ function SavesModal({ cfg, onLoad, onClose,
 function App() {
   const [step,setStep]=useState(0);
   const [cfg,setCfg]=useState(()=>{
-    try{const s=localStorage.getItem('mct_cfg_v2');if(s)return{...DEFAULT_CFG,...JSON.parse(s)};}catch(e){}
+    try{
+      const s=localStorage.getItem('mct_cfg_v3');
+      if(s) return {...DEFAULT_CFG,...JSON.parse(s)};
+      // Migrate from v2 — carry over everything except loadCombos (rebuilt from deadLoads)
+      const v2=localStorage.getItem('mct_cfg_v2');
+      if(v2){
+        const old=JSON.parse(v2);
+        const migrated={...DEFAULT_CFG,...old};
+        migrated.loadCombos=buildDefaultCombos(migrated.deadLoads||DEFAULT_CFG.deadLoads);
+        return migrated;
+      }
+    }catch(e){}
     return DEFAULT_CFG;
   });
   const [savedMsg,setSavedMsg]=useState('');
@@ -4633,7 +4754,7 @@ function App() {
 
   // Auto-sync dlc_* combos whenever dead loads change (name, type, add, remove)
   // Keeps AASHTO presets and custom combos intact — only replaces dlc_* entries
-  const deadLoadsKey = JSON.stringify((cfg.deadLoads||[]).map(d=>({id:d.id,name:d.name,type:d.type,active:d.value>0})));
+  const deadLoadsKey = JSON.stringify((cfg.deadLoads||[]).map(d=>({id:d.id,name:d.name,type:d.type})));
   useEffect(()=>{
     setCfg(prev=>{
       const currentCombos = prev.loadCombos || [];
@@ -4644,7 +4765,7 @@ function App() {
   }, [deadLoadsKey]);
 
   useEffect(()=>{
-    try{localStorage.setItem('mct_cfg_v2',JSON.stringify(cfg));}catch(e){}
+    try{localStorage.setItem('mct_cfg_v3',JSON.stringify(cfg));}catch(e){}
   },[cfg]);
 
   const loadDefault=()=>{if(window.confirm('Reset all inputs to defaults?'))setCfg(DEFAULT_CFG);};
