@@ -1208,26 +1208,26 @@ const AASHTO_PRESETS = [
 // those forces separately for use in post-processing combinations.
 function buildDeadLoadCombos(deadLoads) {
   const all = deadLoads||[];
-  // One passthrough combo per individual load case
-  const individual = all.map(d=>({
-    id: 'dlc_'+d.id,
-    name: d.name,
+  const dc1Loads = all.filter(d=>d.type==='DC1' && d.value>0);
+  const dc2Loads = all.filter(d=>d.type==='DC2' && d.value>0);
+  const dwLoads  = all.filter(d=>d.type==='DW'  && d.value>0);
+  const dcLoads  = all.filter(d=>d.type!=='DW'  && d.value>0); // DC1 + DC2
+
+  const makeCombo = (id, name, loads, note) => ({
+    id,
+    name,
     kind: 'SERVICE',
-    active: true,
-    note: `${d.type} individual load case — factor 1.0`,
-    terms: [{ lc:d.name, type:'ST', factor:1, _key:'dlc_'+d.id+'_t0' }],
-  }));
-  // "DC" grouped combo = all DC1 + DC2 (and plain legacy 'DC') loads combined at factor 1.0
-  const dcLoads = all.filter(d=>d.type!=='DW');
-  const dcAllCombo = dcLoads.length > 0 ? [{
-    id: 'dlc_dc_all',
-    name: 'DC',
-    kind: 'SERVICE',
-    active: true,
-    note: 'All DC structural dead loads combined — factor 1.0',
-    terms: dcLoads.map(d=>({ lc:d.name, type:'ST', factor:1, _key:'dlc_dc_all_'+d.id })),
-  }] : [];
-  return [...individual, ...dcAllCombo];
+    active: loads.length > 0,
+    note,
+    terms: loads.map(d=>({ lc:d.name, type:'ST', factor:1, _key:id+'_'+d.id })),
+  });
+
+  return [
+    makeCombo('dlc_dc1', 'DC1', dc1Loads, 'Non-composite structural dead loads (DC1) — factor 1.0'),
+    makeCombo('dlc_dc2', 'DC2', dc2Loads, 'Composite-stage structural dead loads (DC2) — factor 1.0'),
+    makeCombo('dlc_dw',  'DW',  dwLoads,  'Wearing surface / utilities dead loads (DW) — factor 1.0'),
+    makeCombo('dlc_dc',  'DC',  dcLoads,  'All structural dead loads (DC1 + DC2 combined) — factor 1.0'),
+  ];
 }
 
 function buildDefaultCombos(deadLoads) {
