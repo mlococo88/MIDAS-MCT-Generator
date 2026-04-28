@@ -1217,7 +1217,7 @@ function buildDeadLoadCombos(deadLoads) {
     note: `${d.type} individual load case — factor 1.0`,
     terms: [{ lc:d.name, type:'ST', factor:1, _key:'dlc_'+d.id+'_t0' }],
   }));
-  // "DC" grouped combo = all DC1 + DC2 loads at factor 1.0
+  // "DC" grouped combo = all DC1 + DC2 (and plain legacy 'DC') loads combined at factor 1.0
   const dcLoads = all.filter(d=>d.type!=='DW');
   const dcAllCombo = dcLoads.length > 0 ? [{
     id: 'dlc_dc_all',
@@ -1518,16 +1518,12 @@ function StepCombos({cfg,set}) {
       <button onClick={addCustom} style={{background:'#1d4ed8',border:'none',borderRadius:'5px',
         color:'#fff',padding:'7px 16px',cursor:'pointer',fontSize:'12.5px',fontWeight:'600'}}>+ Custom Combo</button>
       <button onClick={()=>{
-          // Sync: rebuild dead-load passthrough combos from current Step 4 names.
-          // Updates name/terms on existing DL combos; adds any new ones; leaves AASHTO/custom combos intact.
+          // Sync: cleanly replace ALL dlc_ combos with a fresh set from Step 4.
+          // This guarantees DC1, DC2, DW (individual) and DC (all DC loads combined) are present.
+          // Non-dlc_ combos (AASHTO presets, custom) are kept as-is.
           const freshDL = buildDeadLoadCombos(cfg.deadLoads||[]);
-          const freshIds = new Set(freshDL.map(f=>f.id));
-          const updatedExisting = combos.map(c=>{
-            const fresh = freshDL.find(f=>f.id===c.id);
-            return fresh ? {...c, name:fresh.name, terms:fresh.terms} : c;
-          });
-          const newOnes = freshDL.filter(f=>!combos.some(c=>c.id===f.id));
-          setCombos([...updatedExisting, ...newOnes]);
+          const kept = combos.filter(c=>!c.id?.startsWith('dlc_'));
+          setCombos([...freshDL, ...kept]);
         }}
         title="Re-generate one passthrough combo per dead load from Step 4 — keeps AASHTO presets and custom combos"
         style={{background:'#fff',border:'1px solid #bfdbfe',borderRadius:'5px',
