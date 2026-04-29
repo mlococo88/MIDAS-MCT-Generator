@@ -2327,13 +2327,31 @@ const PHI_CONDITION = {
   'Fair (NBI = 5)':                  0.95,
   'Poor (NBI ≤ 4)':                  0.85,
 };
+// ── Service II load factors (AASHTO LRFD Table 3.4.1-1) ──────────────────────
+const SERVICE_II_FACTORS = { DC:1.0, DW:1.0, LL:1.3 };
+
+// ── Fatigue detail categories — MBE Table 6A.6.4.2.1-1 ───────────────────────
+// A_coeff in ksi³, threshold in ksi
+const FATIGUE_CATEGORIES = {
+  'A':  { label:'A',  A:250e8, threshold:24.0 },
+  'B':  { label:'B',  A:120e8, threshold:16.0 },
+  "B'": { label:"B'", A: 61e8, threshold:12.0 },
+  'C':  { label:'C',  A: 44e8, threshold:10.0 },
+  "C'": { label:"C'", A: 44e8, threshold:12.0 },
+  'D':  { label:'D',  A: 22e8, threshold: 7.0 },
+  'E':  { label:'E',  A: 11e8, threshold: 4.5 },
+  "E'": { label:"E'", A:3.9e8, threshold: 2.6 },
+};
+// Fraction of trucks in lane by number of lanes (AASHTO 3.6.1.4)
+const FATIGUE_P = { 1:1.00, 2:0.85, 3:0.80 };
+// Fatigue load factors
+const FATIGUE_GAMMA = { 'I':1.5, 'II':0.75 };
+
 // Legal LL factors by ADTT — MBE Table 6A.4.4.2.3a-1
-// Unknown or ADTT ≥ 5,000: 1.45 | ADTT ≤ 1,000: 1.30 | Linear interpolation between
 function legalLLfactor(adtt) {
   if (adtt == null || adtt < 0) return 1.45; // Unknown → 1.45
   if (adtt >= 5000) return 1.45;
   if (adtt <= 1000) return 1.30;
-  // Linear interpolation between 1,000 and 5,000
   return +(1.30 + (1.45 - 1.30) * (adtt - 1000) / (5000 - 1000)).toFixed(4);
 }
 
@@ -2528,27 +2546,30 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   const [envelopeCh,   setEnvelopeCh]   = useState(['momentY','shearZ']);
   const [dlLCs,        setDlLCs]        = useState([]);
   // ── Rating state (MBE-compliant) ──────────────────────────────────────────
-  const [ratingMethod,    setRatingMethod]    = useState('LRFR');
-  const [ratingLevel,     setRatingLevel]     = useState('Inventory');
-  const [ratingLimitState,setRatingLimitState]= useState('Strength I');
-  const [ratingCategory,  setRatingCategory]  = useState('Design');   // Design|Legal|Permit
-  const [ratingAdtt,      setRatingAdtt]      = useState(5000);
-  const [ratingDcLC,      setRatingDcLC]      = useState('');
-  const [ratingDwLC,      setRatingDwLC]      = useState('');
-  const [ratingLLposLC,   setRatingLLposLC]   = useState('');
-  const [ratingLLnegLC,   setRatingLLnegLC]   = useState('');
-  const [ratingCustomFact,setRatingCustomFact]= useState(false);
-  const [ratingGamDC,     setRatingGamDC]     = useState(1.25);
-  const [ratingGamDW,     setRatingGamDW]     = useState(1.50);
-  const [ratingGamLL,     setRatingGamLL]     = useState(1.75);
-  // imFactor is now embedded in ratingLLScale via the 'im' factor in ratingLLFactors
-  const [ratingCondKey,   setRatingCondKey]   = useState('Good or Satisfactory (NBI ≥ 6)');
-  const [ratingSysKey,    setRatingSysKey]    = useState('Welded I-beam, multiple lanes');
-  const [ratingPhiSCustom,setRatingPhiSCustom]= useState(1.0);
-  const [ratingPhiF,      setRatingPhiF]      = useState(1.0);
-  const [ratingPhiV,      setRatingPhiV]      = useState(1.0);
-  const [ratingEta,       setRatingEta]       = useState(1.0);   // load modifier η
-  // ── Rating LL scale factors (LLDF, IM, MPF, user) ────────────────────────
+  // ── Rating inputs — all persisted through cfg.rating ─────────────────────
+  const R = cfg.rating || {};
+  const setRating = (field, val) => set(c=>({...c, rating:{...(c.rating||{}), [field]:val}}));
+
+  const ratingMethod     = R.method      ?? 'LRFR';
+  const ratingLevel      = R.level       ?? 'Inventory';
+  const ratingLimitState = R.limitState  ?? 'Strength I';
+  const ratingCategory   = R.category    ?? 'Design';
+  const ratingAdtt       = R.adtt        ?? 5000;
+  const ratingDcLC       = R.dcLC        ?? '';
+  const ratingDwLC       = R.dwLC        ?? '';
+  const ratingLLposLC    = R.llposLC     ?? '';
+  const ratingLLnegLC    = R.llnegLC     ?? '';
+  const ratingCustomFact = R.customFact  ?? false;
+  const ratingGamDC      = R.gamDC       ?? 1.25;
+  const ratingGamDW      = R.gamDW       ?? 1.50;
+  const ratingGamLL      = R.gamLL       ?? 1.75;
+  const ratingCondKey    = R.condKey     ?? 'Good or Satisfactory (NBI ≥ 6)';
+  const ratingSysKey     = R.sysKey      ?? 'Welded I-beam, multiple lanes';
+  const ratingPhiSCustom = R.phiSCustom  ?? 1.0;
+  const ratingPhiF       = R.phiF        ?? 1.0;
+  const ratingPhiV       = R.phiV        ?? 1.0;
+  const ratingEta        = R.eta         ?? 1.0;
+
   const DEFAULT_RATING_LL_FACTORS = [
     {id:'df',  label:'Distribution Factor',      symbol:'g',  value:1.0, enabled:false, hint:'AASHTO 4.6.2.2 — g',          isPercent:false},
     {id:'im',  label:'Dynamic Load Allowance',   symbol:'IM', value:33,  enabled:true,  hint:'Applied as (1+IM/100) to LL', isPercent:true },
@@ -2556,8 +2577,56 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
     {id:'u1',  label:'User Factor 1',            symbol:'F₁', value:1.0, enabled:false, hint:'Custom LL multiplier',        isPercent:false},
     {id:'u2',  label:'User Factor 2',            symbol:'F₂', value:1.0, enabled:false, hint:'Custom LL multiplier',        isPercent:false},
   ];
-  const [ratingLLFactors, setRatingLLFactors] = useState(DEFAULT_RATING_LL_FACTORS);
-  const [ratingLLOpen,    setRatingLLOpen]    = useState(false);
+  const ratingLLFactors  = R.llFactors   ?? DEFAULT_RATING_LL_FACTORS;
+  const [ratingLLOpen, setRatingLLOpen]  = useState(false);
+
+  const ratingVehicleTon  = R.vehicleTon  ?? 36;
+  const ratingVehicleName = R.vehicleName ?? 'HL-93 Design Truck';
+  const rfYMax            = R.rfYMax      ?? 3;
+  const vehicleLCMap      = R.vehicleLCMap ?? {};
+
+  // Service II inputs
+  const serviceIIDcLC     = R.serviceIIDcLC    ?? '';
+  const serviceIIDwLC     = R.serviceIIDwLC    ?? '';
+  const serviceIILLposLC  = R.serviceIILLposLC ?? '';
+  const serviceIILLnegLC  = R.serviceIILLnegLC ?? '';
+  const serviceIIRh       = R.serviceIIRh      ?? 1.0;
+
+  // Fatigue inputs
+  const fatigueLCpos      = R.fatigueLCpos      ?? '';
+  const fatigueLCneg      = R.fatigueLCneg      ?? '';
+  const fatigueAdtt       = R.fatigueAdtt       ?? 5000;
+  const fatigueLanes      = R.fatigueLanes       ?? 2;
+  const fatigueCyclesN    = R.fatigueCyclesN     ?? 1;
+  const fatigueCategory   = R.fatigueCategory    ?? 'C';
+  const fatigueLimitState = R.fatigueLimitState  ?? 'I';
+  const fatigueZoneCategories = R.fatigueZoneCategories ?? {};
+
+  // Setters — all write through to cfg.rating
+  const setRatingMethod     = v => setRating('method',v);
+  const setRatingLevel      = v => setRating('level',v);
+  const setRatingLimitState = v => setRating('limitState',v);
+  const setRatingCategory   = v => setRating('category',v);
+  const setRatingAdtt       = v => setRating('adtt',v);
+  const setRatingDcLC       = v => setRating('dcLC',v);
+  const setRatingDwLC       = v => setRating('dwLC',v);
+  const setRatingLLposLC    = v => setRating('llposLC',v);
+  const setRatingLLnegLC    = v => setRating('llnegLC',v);
+  const setRatingCustomFact = v => setRating('customFact',v);
+  const setRatingGamDC      = v => setRating('gamDC',v);
+  const setRatingGamDW      = v => setRating('gamDW',v);
+  const setRatingGamLL      = v => setRating('gamLL',v);
+  const setRatingCondKey    = v => setRating('condKey',v);
+  const setRatingSysKey     = v => setRating('sysKey',v);
+  const setRatingPhiSCustom = v => setRating('phiSCustom',v);
+  const setRatingPhiF       = v => setRating('phiF',v);
+  const setRatingPhiV       = v => setRating('phiV',v);
+  const setRatingEta        = v => setRating('eta',v);
+  const setRatingLLFactors  = v => setRating('llFactors', typeof v==='function' ? v(ratingLLFactors) : v);
+  const setRatingVehicleTon  = v => setRating('vehicleTon',v);
+  const setRatingVehicleName = v => setRating('vehicleName',v);
+  const setRfYMax            = v => setRating('rfYMax',v);
+  const setVehicleLCMap      = v => setRating('vehicleLCMap', typeof v==='function' ? v(vehicleLCMap) : v);
   // ── Capacity zone helpers ─────────────────────────────────────────────────
   const capZones = ratingCapZones && ratingCapZones.length ? ratingCapZones : [];
   const setCapZones = setRatingCapZones || (()=>{});
@@ -2569,6 +2638,7 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
     id: capUid(), startX:0, endX:totalBridgeForCap||100,
     type:'manual', MnPos:500, MnNeg:500, Vn:150,
     Fy:50, ZxPos:0, ZxNeg:0, Aw:0,
+    SxPos:0, SxNeg:0,   // elastic section modulus (in³) for Service II / Fatigue
   });
 
   const addCapZone = () => {
@@ -2603,6 +2673,8 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
     const Aw = +(d*props[1]).toFixed(2);
     updateCapZone(zoneId,'ZxPos',Zx);
     updateCapZone(zoneId,'ZxNeg',Zx);
+    updateCapZone(zoneId,'SxPos',Sx);
+    updateCapZone(zoneId,'SxNeg',Sx);
     updateCapZone(zoneId,'Aw',Aw);
   };
 
@@ -2620,16 +2692,11 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
     }
     return {MnPos:z.MnPos||0, MnNeg:z.MnNeg||0, Vn:z.Vn||0};
   };
-  const [ratingVehicleTon,setRatingVehicleTon]= useState(36);
-  const [ratingVehicleName,setRatingVehicleName]=useState('HL-93 Design Truck');
-  const [rfYMax, setRfYMax] = useState(3); // null = auto
   // Rating sub-tab and D/C chart state — must be at component level (Rules of Hooks)
   const [ratingSubTab, setRatingSubTab] = useState('inputs');
   const [dcMode,  setDcMode]  = useState('moment');
   const [showInv, setShowInv] = useState(true);
   const [showOp,  setShowOp]  = useState(true);
-  // Per-vehicle LC assignment for multi-vehicle rating { [vehicleName]: {posLC, negLC} }
-  const [vehicleLCMap, setVehicleLCMap] = useState({});
   // Auto-populate vehicleLCMap when rows or selected vehicles change
   useEffect(()=>{
     if (!origRows.length || !(cfg?.selectedVehicles?.length)) return;
@@ -2786,6 +2853,139 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   },[ratingData, gamDC, gamDW, gamLL_op, ratingLLScale]);
 
   const govOperating = operatingData.length ? operatingData.reduce((a,b)=>a.rfGov<b.rfGov?a:b,operatingData[0]) : null;
+
+  // ── Service II — AASHTO LRFD 6.10.4.2 ───────────────────────────────────
+  // Stress check: f_DC + f_DW + 1.3·f_LL ≤ 0.95·Rh·Fyf
+  // f = M·12 / Sx  (moment in ft·k, Sx in in³, stress in ksi)
+  // Sx is taken from cap zone SxPos/SxNeg fields; Fyf from zone Fy field
+  const serviceIIData = useMemo(()=>{
+    if (!capZones.length || !origRows.length || (!serviceIIDcLC && !serviceIILLposLC)) return [];
+    const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
+      .filter(n=>nodePositions[n]!==undefined)
+      .sort((a,b)=>nodePositions[a]-nodePositions[b]);
+
+    return nodeList.map(node=>{
+      const xPos = nodePositions[node]??0;
+      const dc  = serviceIIDcLC  ? origRows.find(r=>r.load===serviceIIDcLC &&r.node===node) : null;
+      const dw  = serviceIIDwLC  ? origRows.find(r=>r.load===serviceIIDwLC &&r.node===node) : null;
+      const llp = serviceIILLposLC ? origRows.find(r=>r.load===serviceIILLposLC&&r.node===node) : null;
+      const lln = serviceIILLnegLC ? origRows.find(r=>r.load===serviceIILLnegLC&&r.node===node) : llp;
+
+      const z = capZones.find(z=>xPos>=parseFloat(z.startX)-0.001&&xPos<parseFloat(z.endX)+0.001)
+             || capZones[capZones.length-1];
+      const Fyf   = z?.Fy     || 50;
+      const SxPos = z?.SxPos  || 0;
+      const SxNeg = z?.SxNeg  || 0;
+      const Rh    = serviceIIRh || 1.0;
+      const limit = 0.95 * Rh * Fyf; // ksi
+
+      const toStress = (M, Sx) => Sx>0 ? Math.abs(M)*12/Sx : null;
+
+      const Mdc  = dc?.momentY  || 0;
+      const Mdw  = dw?.momentY  || 0;
+      const Mllp = llp?.momentY || 0;
+      const Mlln = Math.min(0, lln?.momentY||0);
+
+      // Bottom flange positive moment check
+      const fDCpos  = toStress(Math.abs(Mdc), SxPos);
+      const fDWpos  = toStress(Math.abs(Mdw), SxPos);
+      const fLLpos  = toStress(Math.max(0,Mllp), SxPos);
+      const demPos  = fDCpos!=null&&fLLpos!=null ? fDCpos+(fDWpos||0)+SERVICE_II_FACTORS.LL*fLLpos : null;
+      const rfPos   = demPos!=null&&demPos>0 ? +(limit/demPos).toFixed(4) : null;
+
+      // Top flange negative moment check
+      const fDCneg  = toStress(Math.abs(Mdc), SxNeg);
+      const fDWneg  = toStress(Math.abs(Mdw), SxNeg);
+      const fLLneg  = toStress(Math.abs(Mlln), SxNeg);
+      const demNeg  = fDCneg!=null&&fLLneg!=null&&fLLneg>0 ? fDCneg+(fDWneg||0)+SERVICE_II_FACTORS.LL*fLLneg : null;
+      const rfNeg   = demNeg!=null&&demNeg>0 ? +(limit/demNeg).toFixed(4) : null;
+
+      const rfGov = rfPos!=null||rfNeg!=null
+        ? Math.min(...[rfPos,rfNeg].filter(v=>v!=null))
+        : null;
+
+      return {
+        node, pos:xPos, SxPos, SxNeg, Fyf, Rh, limit:+limit.toFixed(2),
+        fDCpos:fDCpos!=null?+fDCpos.toFixed(3):null,
+        fDWpos:fDWpos!=null?+fDWpos.toFixed(3):null,
+        fLLpos:fLLpos!=null?+fLLpos.toFixed(3):null,
+        demPos:demPos!=null?+demPos.toFixed(3):null, rfPos,
+        fDCneg:fDCneg!=null?+fDCneg.toFixed(3):null,
+        fDWneg:fDWneg!=null?+fDWneg.toFixed(3):null,
+        fLLneg:fLLneg!=null?+fLLneg.toFixed(3):null,
+        demNeg:demNeg!=null?+demNeg.toFixed(3):null, rfNeg,
+        rfGov, governs: rfNeg!=null&&(rfPos==null||rfNeg<=rfPos) ? 'M⁻' : 'M⁺',
+      };
+    }).filter(p=>p.rfGov!=null);
+  },[origRows, capZones, nodePositions, serviceIIDcLC, serviceIIDwLC,
+     serviceIILLposLC, serviceIILLnegLC, serviceIIRh]);
+
+  const govServiceII = serviceIIData.length
+    ? serviceIIData.reduce((a,b)=>a.rfGov<b.rfGov?a:b, serviceIIData[0])
+    : null;
+
+  // ── Fatigue — AASHTO MBE 6A.6.4 ─────────────────────────────────────────
+  // Fatigue I: RF = (ΔF)_TH / (γ_I · Δf)   where γ_I = 1.5
+  // Fatigue II: RF = (ΔF)_n / (γ_II · Δf)  where γ_II = 0.75
+  // Δf = stress range from fatigue vehicle = ΔM·12/Sx  (ksi)
+  // (ΔF)_n = (A/N)^(1/3), N = 365·75·n·p·ADTT_SL
+  const fatigueData = useMemo(()=>{
+    if (!capZones.length || !origRows.length || !fatigueLCpos) return [];
+    const p_lanes = FATIGUE_P[Math.min(fatigueLanes,3)] ?? 0.80;
+    const ADTT_SL  = fatigueAdtt * p_lanes;
+    const N        = 365 * 75 * fatigueCyclesN * ADTT_SL;
+
+    const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
+      .filter(n=>nodePositions[n]!==undefined)
+      .sort((a,b)=>nodePositions[a]-nodePositions[b]);
+
+    return nodeList.map(node=>{
+      const xPos = nodePositions[node]??0;
+      const llp = origRows.find(r=>r.load===fatigueLCpos&&r.node===node);
+      const lln = fatigueLCneg ? origRows.find(r=>r.load===fatigueLCneg&&r.node===node) : null;
+      if (!llp) return null;
+
+      const z = capZones.find(z=>xPos>=parseFloat(z.startX)-0.001&&xPos<parseFloat(z.endX)+0.001)
+             || capZones[capZones.length-1];
+      const SxPos  = z?.SxPos || 0;
+      const SxNeg  = z?.SxNeg || 0;
+      // Per-zone category overrides global default
+      const cat    = fatigueZoneCategories[z?.id] || fatigueCategory;
+      const catDef = FATIGUE_CATEGORIES[cat] || FATIGUE_CATEGORIES['C'];
+
+      // Stress range: max positive moment minus min (most negative) moment
+      const Mmax = llp?.momentY || 0;
+      const Mmin = lln?.momentY ?? 0;
+      const dM   = Math.abs(Mmax - Mmin); // moment range, ft-kips
+      const Sx   = Mmax >= 0 ? SxPos : SxNeg; // use appropriate Sx
+      const df   = Sx>0 ? dM*12/Sx : null;   // stress range, ksi
+
+      if (df===null) return null;
+
+      // Finite life
+      const dFn  = N>0 ? +(Math.pow(catDef.A/N, 1/3)).toFixed(4) : null;
+      // Infinite life threshold
+      const dFth = catDef.threshold;
+
+      const rfI  = df>0 ? +(dFth / (FATIGUE_GAMMA['I']  * df)).toFixed(4) : null;
+      const rfII = df>0&&dFn!=null ? +(dFn  / (FATIGUE_GAMMA['II'] * df)).toFixed(4) : null;
+
+      const rfGov = Math.min(...[rfI,rfII].filter(v=>v!=null));
+      return {
+        node, pos:xPos, cat, SxUsed:+Sx.toFixed(1),
+        Mmax:+Mmax.toFixed(1), Mmin:+Mmin.toFixed(1), dM:+dM.toFixed(1),
+        df:+df.toFixed(4), dFth, dFn:dFn!=null?+dFn.toFixed(4):null,
+        rfI, rfII, rfGov:+rfGov.toFixed(4),
+        governs: rfII!=null&&rfII<=rfI ? 'Finite' : 'Infinite',
+      };
+    }).filter(Boolean);
+  },[origRows, capZones, nodePositions, fatigueLCpos, fatigueLCneg,
+     fatigueAdtt, fatigueLanes, fatigueCyclesN, fatigueCategory,
+     fatigueZoneCategories, fatigueLimitState]);
+
+  const govFatigue = fatigueData.length
+    ? fatigueData.reduce((a,b)=>a.rfGov<b.rfGov?a:b, fatigueData[0])
+    : null;
 
   // ── Multi-vehicle rating table ────────────────────────────────────────────
   // ── Multi-vehicle rating — uses ACTUAL result rows per vehicle ────────────
@@ -3305,7 +3505,9 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                 {id:'inputs',   label:'⚙ Inputs & Setup'},
                 {id:'table',    label:'📋 Multi-Vehicle Table', locked:!hasData},
                 {id:'dc',       label:'📊 Demand vs. Capacity', locked:!hasData},
-                {id:'card',     label:'🗒 Rating Report Card',  locked:!hasData},
+                {id:'serviceII',label:'🔧 Service II',          locked:!hasData},
+                {id:'fatigue',  label:'💀 Fatigue',             locked:!hasData},
+                {id:'card',     label:'🗒 Report Card',         locked:!hasData},
               ].map(t=>(
                 <button key={t.id} onClick={()=>!t.locked&&setRatingSubTab(t.id)}
                   disabled={t.locked}
@@ -3791,6 +3993,25 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                         → Mn⁺ = {(z.ZxPos>0?z.Fy*(z.ZxPos||0)/12:z.MnPos||0).toFixed(1)} ft·k &nbsp;
                            Mn⁻ = {(z.ZxNeg>0?z.Fy*(z.ZxNeg||0)/12:z.MnNeg||0).toFixed(1)} ft·k &nbsp;
                            Vn = {(z.Aw>0?0.6*(z.Fy||0)*(z.Aw||0):z.Vn||0).toFixed(1)} kips
+                      </div>
+                      {/* Sx for Service II / Fatigue */}
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px',marginTop:'8px',
+                        padding:'7px 10px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#1d4ed8',gridColumn:'1/-1',marginBottom:'3px',fontWeight:'600'}}>
+                          Elastic Section Modulus — for Service II &amp; Fatigue stress checks
+                        </div>
+                        {[['Sx⁺ (in³) — bottom flange positive moment','SxPos'],['Sx⁻ (in³) — top flange negative moment','SxNeg']].map(([lbl,field])=>(
+                          <div key={field}>
+                            <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                            <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}
+                              value={z[field]||''} onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                          </div>
+                        ))}
+                        {(z.SxPos>0||z.SxNeg>0)&&(
+                          <div style={{gridColumn:'1/-1',fontSize:'9.5px',fontFamily:'monospace',color:'#1e40af',marginTop:'2px'}}>
+                            Stress limit 0.95·Rh·Fyf = {(0.95*1.0*(z.Fy||50)).toFixed(1)} ksi
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
@@ -4444,6 +4665,341 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
               </div>
             </div>)}
 
+            {/* ════ SUB-TAB: SERVICE II ════ */}
+            {ratingSubTab==='serviceII'&&(<div>
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111827',marginBottom:'4px'}}>Service II — Flange Stress Check</div>
+                <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',marginBottom:'12px',
+                  padding:'7px 10px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'5px'}}>
+                  AASHTO LRFD 6.10.4.2 · f_DC + f_DW + 1.3·f_LL ≤ 0.95·Rh·Fyf · f = M·12/Sx (ksi)
+                  &nbsp;·&nbsp; <strong>Sx must be entered in the Capacity Zones above</strong>
+                </div>
+
+                {/* LC Selectors */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'16px'}}>
+                  {[
+                    {label:'Dead Load DC',val:serviceIIDcLC,  set:v=>setRating('serviceIIDcLC',v),  color:'#374151'},
+                    {label:'Dead Load DW',val:serviceIIDwLC,  set:v=>setRating('serviceIIDwLC',v),  color:'#6b7280'},
+                    {label:'Live Load max',val:serviceIILLposLC,set:v=>setRating('serviceIILLposLC',v),color:'#1d4ed8'},
+                    {label:'Live Load min (opt.)',val:serviceIILLnegLC,set:v=>setRating('serviceIILLnegLC',v),color:'#7c3aed'},
+                  ].map(({label,val,set:setter,color})=>(
+                    <div key={label}>
+                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color,fontWeight:'500',marginBottom:'4px'}}>{label}</div>
+                      <select value={val} onChange={e=>setter(e.target.value)} style={{...INP,fontSize:'12px'}}>
+                        <option value="">— none —</option>
+                        {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
+                          <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
+                        ):null)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Rh */}
+                <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'16px'}}>
+                  <span style={{fontSize:'11px',fontFamily:'monospace',color:'#374151'}}>Hybrid Factor Rh</span>
+                  <input type="number" step="0.05" min="0.5" max="1.0" value={serviceIIRh}
+                    onChange={e=>setRating('serviceIIRh',parseFloat(e.target.value)||1.0)}
+                    style={{...INP2,width:'80px',fontFamily:'monospace',fontWeight:'600'}}/>
+                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>1.0 for homogeneous sections · AASHTO 6.10.1.10.1</span>
+                </div>
+
+                {/* No Sx warning */}
+                {serviceIIData.length===0&&(serviceIIDcLC||serviceIILLposLC)&&capZones.every(z=>!(z.SxPos>0))&&(
+                  <div style={{padding:'10px 14px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    ⚠ No Sx values found in capacity zones. Go to Inputs tab → Capacity Zones → enter Sx⁺ and Sx⁻ for each zone.
+                    Use the Quick Calc mode and click "Import from section" to auto-populate from W-shape properties.
+                  </div>
+                )}
+
+                {/* Results table */}
+                {serviceIIData.length>0&&(<>
+                  {/* Summary cards */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'10px',marginBottom:'14px'}}>
+                    {[
+                      {label:'Min RF (governing)', value:govServiceII?.rfGov?.toFixed(3)??'—',
+                       color:govServiceII?.rfGov>=1?'#059669':'#dc2626'},
+                      {label:'Governing node', value:govServiceII?`N${govServiceII.node} · ${govServiceII.pos.toFixed(2)} ft`:'—', color:'#374151'},
+                      {label:'Controls', value:govServiceII?.governs??'—', color:'#1d4ed8'},
+                    ].map(({label,value,color})=>(
+                      <div key={label} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'7px',padding:'10px 14px'}}>
+                        <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'4px'}}>{label}</div>
+                        <div style={{fontSize:'18px',fontWeight:'700',fontFamily:'monospace',color}}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                      <thead>
+                        <tr style={{background:'#f9fafb'}}>
+                          {['Node','Pos (ft)','Sx⁺ (in³)','Sx⁻ (in³)','Fyf (ksi)','Limit (ksi)',
+                            'f_DC (ksi)','f_DW (ksi)','f_LL (ksi)','Demand M⁺ (ksi)','RF M⁺',
+                            'f_LL neg (ksi)','Demand M⁻ (ksi)','RF M⁻','RF Gov','Status'].map(h=>(
+                            <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',color:'#6b7280',
+                              fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...serviceIIData].sort((a,b)=>a.rfGov-b.rfGov).map(p=>{
+                          const col=p.rfGov>=1?'#059669':'#dc2626';
+                          const bg =p.rfGov>=1?'#f0fdf4':'#fef2f2';
+                          return (
+                            <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
+                              <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                              <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.SxPos||'—'}</td>
+                              <td style={{padding:'5px 8px',color:'#7c3aed'}}>{p.SxNeg||'—'}</td>
+                              <td style={{padding:'5px 8px'}}>{p.Fyf}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:'#059669'}}>{p.limit}</td>
+                              <td style={{padding:'5px 8px'}}>{p.fDCpos??'—'}</td>
+                              <td style={{padding:'5px 8px'}}>{p.fDWpos??'—'}</td>
+                              <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.fLLpos??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:p.demPos>p.limit?'#dc2626':'#374151'}}>{p.demPos??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'700',color:p.rfPos>=1?'#059669':'#dc2626'}}>{p.rfPos?.toFixed(3)??'—'}</td>
+                              <td style={{padding:'5px 8px',color:'#7c3aed'}}>{p.fLLneg??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:p.demNeg!=null&&p.demNeg>p.limit?'#dc2626':'#374151'}}>{p.demNeg??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'700',color:p.rfNeg!=null?(p.rfNeg>=1?'#059669':'#dc2626'):'#9ca3af'}}>{p.rfNeg?.toFixed(3)??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px'}}>
+                                <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
+                                  padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                                  {p.rfGov>=1?'✓ OK':'❌ FAIL'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{padding:'6px 12px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
+                    fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    γ_DC=1.0 · γ_DW=1.0 · γ_LL=1.3 · Rh={serviceIIRh} · limit = 0.95·Rh·Fyf · f = M·12/Sx
+                  </div>
+                </>)}
+              </div>
+            </div>)}
+
+            {/* ════ SUB-TAB: FATIGUE ════ */}
+            {ratingSubTab==='fatigue'&&(<div>
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111827',marginBottom:'4px'}}>Fatigue Limit State</div>
+                <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',marginBottom:'12px',
+                  padding:'7px 10px',background:'#fdf4ff',border:'1px solid #e9d5ff',borderRadius:'5px'}}>
+                  AASHTO MBE 6A.6.4 · Fatigue I: RF = (ΔF)_TH / (1.5·Δf) · Fatigue II: RF = (ΔF)_n / (0.75·Δf)
+                  &nbsp;·&nbsp; Δf = ΔM·12/Sx (ksi) · <strong>Sx required in Capacity Zones</strong>
+                </div>
+
+                {/* Inputs grid */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px',marginBottom:'16px'}}>
+                  {/* Left — LCs and ADTT */}
+                  <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+                    <div>
+                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#1d4ed8',fontWeight:'500',marginBottom:'4px'}}>Fatigue Vehicle LC — Max (positive moment range)</div>
+                      <select value={fatigueLCpos} onChange={e=>setRating('fatigueLCpos',e.target.value)} style={{...INP,fontSize:'12px',borderColor:fatigueLCpos?'#bbf7d0':'#e5e7eb'}}>
+                        <option value="">— select —</option>
+                        {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
+                          <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
+                        ):null)}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#7c3aed',fontWeight:'500',marginBottom:'4px'}}>Fatigue Vehicle LC — Min (negative moment range, optional)</div>
+                      <select value={fatigueLCneg} onChange={e=>setRating('fatigueLCneg',e.target.value)} style={{...INP,fontSize:'12px'}}>
+                        <option value="">— same as max (use moment envelope) —</option>
+                        {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
+                          <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
+                        ):null)}
+                      </select>
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'8px'}}>
+                      {[
+                        {label:'ADTT (one direction)',field:'fatigueAdtt',    val:fatigueAdtt,    step:100, hint:'trucks/day'},
+                        {label:'Number of lanes',    field:'fatigueLanes',   val:fatigueLanes,   step:1,   hint:'1–3'},
+                        {label:'Cycles/truck n',     field:'fatigueCyclesN', val:fatigueCyclesN, step:1,   hint:'1 for most'},
+                      ].map(({label,field,val,step,hint})=>(
+                        <div key={field}>
+                          <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{label}</div>
+                          <input type="number" step={step} min="1" value={val}
+                            onChange={e=>setRating(field, parseFloat(e.target.value)||1)}
+                            style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}/>
+                          <div style={{fontSize:'8.5px',color:'#9ca3af',fontFamily:'monospace',marginTop:'2px'}}>{hint}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* N calculation display */}
+                    <div style={{padding:'7px 10px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'5px',fontSize:'10px',fontFamily:'monospace',color:'#374151'}}>
+                      {(()=>{
+                        const p_ = FATIGUE_P[Math.min(fatigueLanes,3)]??0.80;
+                        const ADTT_SL = fatigueAdtt*p_;
+                        const N_ = 365*75*fatigueCyclesN*ADTT_SL;
+                        const dFn_ = (cat)=>{
+                          const c=FATIGUE_CATEGORIES[cat]||FATIGUE_CATEGORIES['C'];
+                          return N_>0?+(Math.pow(c.A/N_,1/3)).toFixed(3):0;
+                        };
+                        return <>
+                          ADTT_SL = {fatigueAdtt} × {p_} = {ADTT_SL.toFixed(0)} trucks/day &nbsp;|&nbsp;
+                          N = 365×75×{fatigueCyclesN}×{ADTT_SL.toFixed(0)} = {N_.toExponential(2)} cycles &nbsp;|&nbsp;
+                          (ΔF)_n ({fatigueCategory}) = {dFn_(fatigueCategory)} ksi &nbsp;|&nbsp;
+                          (ΔF)_TH ({fatigueCategory}) = {(FATIGUE_CATEGORIES[fatigueCategory]||FATIGUE_CATEGORIES['C']).threshold} ksi
+                        </>;
+                      })()}
+                    </div>
+                  </div>
+
+                  {/* Right — Category defaults + per-zone overrides */}
+                  <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+                    <div>
+                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#374151',fontWeight:'600',marginBottom:'6px'}}>Default Detail Category</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'4px',marginBottom:'8px'}}>
+                        {Object.keys(FATIGUE_CATEGORIES).map(cat=>(
+                          <button key={cat} onClick={()=>setRating('fatigueCategory',cat)}
+                            style={{padding:'5px 4px',borderRadius:'4px',border:`1px solid ${fatigueCategory===cat?'#7c3aed':'#e5e7eb'}`,
+                              background:fatigueCategory===cat?'#f5f3ff':'#fff',
+                              color:fatigueCategory===cat?'#7c3aed':'#6b7280',
+                              fontFamily:'monospace',fontWeight:fatigueCategory===cat?'700':'400',
+                              fontSize:'11px',cursor:'pointer'}}>
+                            {cat}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Category reference table */}
+                      <div style={{overflowX:'auto'}}>
+                        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'9.5px',fontFamily:'monospace'}}>
+                          <thead>
+                            <tr style={{background:'#f9fafb'}}>
+                              <th style={{padding:'4px 8px',textAlign:'left',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>Cat</th>
+                              <th style={{padding:'4px 8px',textAlign:'right',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>(ΔF)_TH (ksi)</th>
+                              <th style={{padding:'4px 8px',textAlign:'right',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>A×10⁸ (ksi³)</th>
+                              <th style={{padding:'4px 8px',textAlign:'left',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>Typical detail</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {[
+                              ['A',  24.0, 250, 'Plain plate, rolled section'],
+                              ['B',  16.0, 120, 'Butt weld, base metal at fillet weld'],
+                              ["B'", 12.0,  61, 'Fillet weld on web, shear connector'],
+                              ['C',  10.0,  44, 'Stiffener weld, cover plate end'],
+                              ["C'", 12.0,  44, 'Cope, hole'],
+                              ['D',   7.0,  22, 'Cover plate (narrow), groove weld'],
+                              ['E',   4.5,  11, 'Cover plate (wide), attachment'],
+                              ["E'",  2.6, 3.9, 'Attachment > 100mm longitudinal'],
+                            ].map(([cat,th,A,desc])=>(
+                              <tr key={cat} style={{background:fatigueCategory===cat?'#f5f3ff':'#fff',borderBottom:'1px solid #f3f4f6'}}>
+                                <td style={{padding:'3px 8px',fontWeight:'700',color:fatigueCategory===cat?'#7c3aed':'#374151'}}>{cat}</td>
+                                <td style={{padding:'3px 8px',textAlign:'right'}}>{th}</td>
+                                <td style={{padding:'3px 8px',textAlign:'right'}}>{A}</td>
+                                <td style={{padding:'3px 8px',color:'#9ca3af',fontSize:'8.5px'}}>{desc}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Per-zone category overrides */}
+                    {capZones.length>1&&(
+                      <div>
+                        <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#374151',fontWeight:'600',marginBottom:'6px'}}>
+                          Per-Zone Category Override
+                        </div>
+                        {capZones.map(z=>(
+                          <div key={z.id} style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px',
+                            padding:'5px 8px',background:'#f9fafb',borderRadius:'4px',border:'1px solid #e5e7eb'}}>
+                            <span style={{fontSize:'10px',fontFamily:'monospace',color:'#6b7280',flex:1}}>
+                              {z.startX}–{z.endX} ft
+                            </span>
+                            <select value={fatigueZoneCategories[z.id]||fatigueCategory}
+                              onChange={e=>setRating('fatigueZoneCategories',{...fatigueZoneCategories,[z.id]:e.target.value})}
+                              style={{...INP2,width:'70px',fontFamily:'monospace',fontWeight:'600',fontSize:'11px',
+                                color:'#7c3aed',background:'#f5f3ff'}}>
+                              {Object.keys(FATIGUE_CATEGORIES).map(cat=><option key={cat} value={cat}>{cat}</option>)}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Fatigue results */}
+                {fatigueData.length===0&&fatigueLCpos&&capZones.every(z=>!(z.SxPos>0))&&(
+                  <div style={{padding:'10px 14px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    ⚠ Sx values required — enter in Capacity Zones (Inputs tab).
+                  </div>
+                )}
+
+                {fatigueData.length>0&&(<>
+                  {/* Summary cards */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'10px',marginBottom:'14px'}}>
+                    {[
+                      {label:'Min RF (governing)', value:govFatigue?.rfGov?.toFixed(3)??'—',
+                       color:govFatigue?.rfGov>=1?'#059669':'#dc2626'},
+                      {label:'Governing node', value:govFatigue?`N${govFatigue.node} · ${govFatigue.pos.toFixed(2)} ft`:'—', color:'#374151'},
+                      {label:'Controls', value:govFatigue?.governs??'—', color:'#7c3aed'},
+                      {label:'Max stress range Δf', value:govFatigue?`${govFatigue.df.toFixed(3)} ksi`:'—', color:'#374151'},
+                    ].map(({label,value,color})=>(
+                      <div key={label} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'7px',padding:'10px 14px'}}>
+                        <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'4px'}}>{label}</div>
+                        <div style={{fontSize:'16px',fontWeight:'700',fontFamily:'monospace',color}}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                      <thead>
+                        <tr style={{background:'#f9fafb'}}>
+                          {['Node','Pos (ft)','Cat','Sx (in³)','M_max (ft·k)','M_min (ft·k)','ΔM (ft·k)','Δf (ksi)','(ΔF)_TH (ksi)','(ΔF)_n (ksi)','RF Fatigue I','RF Fatigue II','RF Gov','Controls','Status'].map(h=>(
+                            <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',color:'#6b7280',
+                              fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...fatigueData].sort((a,b)=>a.rfGov-b.rfGov).map(p=>{
+                          const col=p.rfGov>=1?'#059669':'#dc2626';
+                          const bg =p.rfGov>=1?'#f0fdf4':'#fef2f2';
+                          return (
+                            <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
+                              <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'700',color:'#7c3aed'}}>{p.cat}</td>
+                              <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.SxUsed}</td>
+                              <td style={{padding:'5px 8px',color:'#059669'}}>{p.Mmax}</td>
+                              <td style={{padding:'5px 8px',color:'#7c3aed'}}>{p.Mmin}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'600'}}>{p.dM}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'700',color:'#374151'}}>{p.df}</td>
+                              <td style={{padding:'5px 8px',color:'#059669'}}>{p.dFth}</td>
+                              <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.dFn??'—'}</td>
+                              <td style={{padding:'5px 8px',color:p.rfI>=1?'#059669':'#dc2626',fontWeight:'600'}}>{p.rfI?.toFixed(3)??'—'}</td>
+                              <td style={{padding:'5px 8px',color:p.rfII>=1?'#059669':'#dc2626',fontWeight:'600'}}>{p.rfII?.toFixed(3)??'—'}</td>
+                              <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px',color:'#6b7280'}}>{p.governs}</td>
+                              <td style={{padding:'5px 8px'}}>
+                                <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
+                                  padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                                  {p.rfGov>=1?'✓ OK':'❌ FAIL'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{padding:'6px 12px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
+                    fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    Fatigue I γ=1.5 · Fatigue II γ=0.75 · N={((()=>{const p_=FATIGUE_P[Math.min(fatigueLanes,3)]??0.80;return(365*75*fatigueCyclesN*fatigueAdtt*p_).toExponential(2)})())} cycles · ADTT_SL={+(fatigueAdtt*(FATIGUE_P[Math.min(fatigueLanes,3)]??0.80)).toFixed(0)}
+                  </div>
+                </>)}
+              </div>
+            </div>)}
+
             {/* ════ SUB-TAB: RATING REPORT CARD ════ */}
             {ratingSubTab==='card'&&(<div>
               {(()=>{
@@ -5064,6 +5620,33 @@ const DEFAULT_CFG = {
   selectedVehicles:['HL-93TRK','HL-93TDM'],
   vehicleDLA:{},useGlobalDLA:false,globalDLA:0,
   laneName:'Suspended Span',laneWidth:10,laneWheelSpacing:6,
+  // ── Rating inputs (persisted) ─────────────────────────────────────────────
+  rating: {
+    method:'LRFR', level:'Inventory', limitState:'Strength I',
+    category:'Design', adtt:5000,
+    dcLC:'', dwLC:'', llposLC:'', llnegLC:'',
+    customFact:false, gamDC:1.25, gamDW:1.50, gamLL:1.75,
+    condKey:'Good or Satisfactory (NBI ≥ 6)',
+    sysKey:'Welded I-beam, multiple lanes',
+    phiSCustom:1.0, phiF:1.0, phiV:1.0, eta:1.0,
+    llFactors:[
+      {id:'df',  label:'Distribution Factor',      symbol:'g',  value:1.0, enabled:false, hint:'AASHTO 4.6.2.2 — g',          isPercent:false},
+      {id:'im',  label:'Dynamic Load Allowance',   symbol:'IM', value:33,  enabled:true,  hint:'Applied as (1+IM/100) to LL', isPercent:true },
+      {id:'mpf', label:'Multiple Presence Factor', symbol:'m',  value:1.0, enabled:false, hint:'1-lane=1.20 · 2-lane=1.00',  isPercent:false},
+      {id:'u1',  label:'User Factor 1',            symbol:'F₁', value:1.0, enabled:false, hint:'Custom LL multiplier',        isPercent:false},
+      {id:'u2',  label:'User Factor 2',            symbol:'F₂', value:1.0, enabled:false, hint:'Custom LL multiplier',        isPercent:false},
+    ],
+    vehicleTon:36, vehicleName:'HL-93 Design Truck',
+    rfYMax:3, vehicleLCMap:{},
+    // Service II
+    serviceIIDcLC:'', serviceIIDwLC:'', serviceIILLposLC:'', serviceIILLnegLC:'',
+    serviceIIRh:1.0,
+    // Fatigue
+    fatigueLCpos:'', fatigueLCneg:'',
+    fatigueAdtt:5000, fatigueLanes:2, fatigueCyclesN:1,
+    fatigueCategory:'C', fatigueLimitState:'I',
+    fatigueZoneCategories:{}, // {[zoneId]: category}
+  },
 };
 // loadCombos is computed from deadLoads so it can reference names
 DEFAULT_CFG.loadCombos = buildDefaultCombos(DEFAULT_CFG.deadLoads);
