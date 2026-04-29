@@ -92,9 +92,9 @@ function generateMCT(cfg) {
     // Migrate legacy fields
     const DLL = cfg.deadLoadLabels||{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'};
     const out = [];
-    if (cfg.deckSlabLoad>0)  out.push({id:'dl_ds',name:DLL.deckSlab||'Deck Slab',type:'DC',value:cfg.deckSlabLoad});
-    if (cfg.haunchLoad>0)    out.push({id:'dl_h', name:DLL.haunch||'Haunch',type:'DC',value:cfg.haunchLoad});
-    if (cfg.diaphragmLoad>0) out.push({id:'dl_di',name:DLL.diaphragm||'Diaphragm',type:'DC',value:cfg.diaphragmLoad});
+    if (cfg.deckSlabLoad>0)  out.push({id:'dl_ds',name:DLL.deckSlab||'Deck Slab',type:'DC1',value:cfg.deckSlabLoad});
+    if (cfg.haunchLoad>0)    out.push({id:'dl_h', name:DLL.haunch||'Haunch',type:'DC1',value:cfg.haunchLoad});
+    if (cfg.diaphragmLoad>0) out.push({id:'dl_di',name:DLL.diaphragm||'Diaphragm',type:'DC1',value:cfg.diaphragmLoad});
     if (cfg.barrierLoad>0)   out.push({id:'dl_b', name:DLL.barrier||'Movable Barrier',type:'DW',value:cfg.barrierLoad});
     return out;
   })();
@@ -1244,7 +1244,7 @@ function StepCombos({cfg,set}) {
   const setCombos = v => typeof v === 'function'
     ? set('loadCombos', v(cfg.loadCombos || []))
     : set('loadCombos', v);
-  const update = (id,field,val) => setCombos(combos.map(c=>c.id===id?{...c,[field]:val}:c));
+  const update = (id,field,val) => setCombos(prev=>prev.map(c=>c.id===id?{...c,[field]:val}:c));
   const reset = () => setCombos(buildDefaultCombos(cfg.deadLoads||[]));
   const activeCount = combos.filter(c=>c.active).length;
 
@@ -1357,7 +1357,7 @@ function StepCombos({cfg,set}) {
                 {!isExpanded&&(
                   <div style={{display:'flex',gap:'5px',flexWrap:'wrap',flex:'2',minWidth:'120px'}}>
                     {(c.terms||[]).filter(t=>t.lc).map((t,ti)=>(
-                      <span key={ti} style={{fontSize:'10.5px',fontFamily:'monospace',
+                      <span key={t._key||t.lc||ti} style={{fontSize:'10.5px',fontFamily:'monospace',
                         background:'#f3f4f6',color:'#374151',padding:'2px 8px',borderRadius:'4px',
                         border:'1px solid #e5e7eb'}}>
                         {t.lc} <span style={{color:'#9ca3af'}}>×{t.factor}</span>
@@ -1531,7 +1531,7 @@ function StepCombos({cfg,set}) {
                 background:'transparent',minWidth:'100px',flex:'1'}}
                 value={c.note||''} onChange={e=>update(c.id,'note',e.target.value)} placeholder="note…"/>
               {/* Delete */}
-              <button onClick={()=>{if(combos.length>1)setCombos(combos.filter(x=>x.id!==c.id));}}
+              <button onClick={()=>setCombos(prev=>prev.length>1?prev.filter(x=>x.id!==c.id):prev)}
                 title="Delete combination"
                 style={{background:'none',border:'none',color:'#e5e7eb',cursor:'pointer',fontSize:'16px',padding:'0',lineHeight:1,flexShrink:0}}
                 onMouseEnter={e=>e.target.style.color='#dc2626'} onMouseLeave={e=>e.target.style.color='#e5e7eb'}>×</button>
@@ -2257,12 +2257,21 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   const combos = resultsCombos || [];
   const setCombos = setResultsCombos || (()=>{});
   const comboUid = () => 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
-  const addCombo = () => setCombos([...combos, {id:comboUid(), name:'New Combination', terms:[{lc:'',factor:1}]}]);
-  const removeCombo = id => setCombos(combos.filter(c=>c.id!==id));
-  const updateCombo = (id,field,val) => setCombos(combos.map(c=>c.id===id?{...c,[field]:val}:c));
-  const addTerm = id => setCombos(combos.map(c=>c.id===id?{...c,terms:[...c.terms,{lc:'',factor:1}]}:c));
-  const removeTerm = (id,ti) => setCombos(combos.map(c=>c.id===id?{...c,terms:c.terms.filter((_,i)=>i!==ti)}:c));
-  const updateTerm = (id,ti,field,val) => setCombos(combos.map(c=>c.id===id?{...c,terms:c.terms.map((t,i)=>i===ti?{...t,[field]:val}:t)}:c));
+  // All combo helpers use functional updaters to avoid stale closure bugs
+  const addCombo    = ()         => setCombos(prev=>[...prev, {id:comboUid(), name:'New Combination', terms:[{lc:'',factor:1}]}]);
+  const removeCombo = id         => setCombos(prev=>prev.filter(c=>c.id!==id));
+  const updateCombo = (id,f,val) => setCombos(prev=>prev.map(c=>c.id===id?{...c,[f]:val}:c));
+  const addTerm     = id         => setCombos(prev=>prev.map(c=>c.id===id?{...c,terms:[...c.terms,{lc:'',factor:1,_key:Math.random().toString(36).slice(2)}]}:c));
+  const removeTerm  = (id,key)   => setCombos(prev=>prev.map(c=>c.id===id?{...c,terms:c.terms.filter(t=>(t._key||t.lc)!==key)}:c));
+  const updateTerm  = (id,key,field,val) => setCombos(prev=>prev.map(c=>c.id===id?{...c,terms:c.terms.map(t=>(t._key||t.lc)===key?{...t,[field]:val}:t)}:c));
+
+  // Staleness: cfg changed after results were parsed — define BEFORE any useEffect that uses it
+  const cfgSnapFields = cfg ? JSON.stringify({
+    spans:cfg.spans, elemsPerSpan:cfg.elemsPerSpan,
+    sectionZones:cfg.sectionZones,
+    deadLoads:cfg.deadLoads,
+    selectedVehicles:cfg.selectedVehicles, laneName:cfg.laneName,
+  }) : null;
 
   // Compute combined rows from origRows + combos
   const computedRows = useMemo(()=>
@@ -2280,13 +2289,6 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   // Reset acknowledgement whenever cfg changes (so warning reappears if they change again)
   useEffect(()=>{ if(staleAcknowledged) setStaleAcknowledged(false); },[cfgSnapFields]);
 
-  // Staleness: cfg changed after results were parsed
-  const cfgSnapFields = cfg ? JSON.stringify({
-    spans:cfg.spans, elemsPerSpan:cfg.elemsPerSpan,
-    sectionZones:cfg.sectionZones,
-    deadLoads:cfg.deadLoads,
-    selectedVehicles:cfg.selectedVehicles, laneName:cfg.laneName,
-  }) : null;
   const isStale = rows.length>0 && cfgSnap && cfgSnapFields && cfgSnap!==cfgSnapFields && !staleAcknowledged;
   const [activeChannels, setActiveChannels] = useState(['momentY','shearZ']);
   const [factors, setFactors] = useState(DEFAULT_FACTORS);
@@ -3622,16 +3624,16 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                   const dcF = mctCombo.dcFactor??1, dwF = mctCombo.dwFactor??1, llF = mctCombo.llFactor??1;
                   origLCnames.forEach(lc=>{
                     if (lc.includes('(max)')||lc.includes('(min)')||lc.includes('(all)')) {
-                      if (llF!==0) terms.push({lc,factor:llF});
+                      if (llF!==0) terms.push({lc,factor:llF,_key:Math.random().toString(36).slice(2)});
                     } else if (dwNames.has(lc)) {
-                      if (dwF!==0) terms.push({lc,factor:dwF});
+                      if (dwF!==0) terms.push({lc,factor:dwF,_key:Math.random().toString(36).slice(2)});
                     } else {
-                      if (dcF!==0) terms.push({lc,factor:dcF});
+                      if (dcF!==0) terms.push({lc,factor:dcF,_key:Math.random().toString(36).slice(2)});
                     }
                   });
                   return {id:comboUid(),name:mctCombo.name,terms};
                 });
-                setCombos([...combos,...newCombos.filter(nc=>!combos.some(c=>c.name===nc.name))]);
+                setCombos(prev=>[...prev,...newCombos.filter(nc=>!prev.some(c=>c.name===nc.name))]);
               }} style={{background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:'6px',
                 color:'#7c3aed',padding:'7px 14px',cursor:'pointer',fontSize:'12px',fontWeight:'500'}}>
                 ↓ Import from Step 6 Combos ({cfg.loadCombos.filter(c=>c.active).length})
@@ -3686,10 +3688,11 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                     <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
                   </div>
                   {combo.terms.map((term,ti)=>{
+                    const tKey = term._key || `${combo.id}_${ti}`;
                     const lcMissing = term.lc && !origRows.some(r=>r.load===term.lc);
                     return (
-                      <div key={ti} style={{display:'grid',gridTemplateColumns:'1fr 110px 32px',gap:'8px',alignItems:'center'}}>
-                        <select value={term.lc} onChange={e=>updateTerm(combo.id,ti,'lc',e.target.value)}
+                      <div key={tKey} style={{display:'grid',gridTemplateColumns:'1fr 110px 32px',gap:'8px',alignItems:'center'}}>
+                        <select value={term.lc} onChange={e=>updateTerm(combo.id,tKey,'lc',e.target.value)}
                           style={{...INP,padding:'5px 8px',fontSize:'12px',borderColor:lcMissing?'#fca5a5':'#e5e7eb',
                             background:lcMissing?'#fef2f2':'#fff'}}>
                           <option value="">— select load case —</option>
@@ -3702,12 +3705,12 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                           )}
                         </select>
                         <input type="number" step="0.05" value={term.factor}
-                          onChange={e=>updateTerm(combo.id,ti,'factor',parseFloat(e.target.value)||0)}
+                          onChange={e=>updateTerm(combo.id,tKey,'factor',parseFloat(e.target.value)||0)}
                           style={{...INP,padding:'5px 8px',fontSize:'13px',fontFamily:'monospace',
                             fontWeight:'600',textAlign:'right',
                             color:term.factor<0?'#dc2626':term.factor===0?'#9ca3af':'#059669',
                             background:Math.abs(term.factor)===1?'#fff':term.factor===0?'#f9fafb':'#fffbeb'}}/>
-                        <button onClick={()=>removeTerm(combo.id,ti)} disabled={combo.terms.length<=1}
+                        <button onClick={()=>removeTerm(combo.id,tKey)} disabled={combo.terms.length<=1}
                           style={{background:'none',border:'none',color:combo.terms.length<=1?'#e5e7eb':'#9ca3af',
                             cursor:combo.terms.length<=1?'default':'pointer',fontSize:'16px',lineHeight:1,padding:'2px'}}>×</button>
                       </div>
@@ -3723,14 +3726,14 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                   </button>
                   <span style={{fontSize:'10px',color:'#d1d5db'}}>|</span>
                   <span style={{fontSize:'10px',color:'#9ca3af',fontFamily:'monospace'}}>Quick fill:</span>
-                  {/* Add all static LCs at given factor */}
                   {[['All DC × 1.25',groupedLCs.Static||[],1.25],
                     ['All DC × 1.0', groupedLCs.Static||[],1.0],
                     ['All DL × 1.0', groupedLCs.Static||[],1.0],
                   ].map(([label,lcs,factor])=>lcs.length>0&&(
                     <button key={label} onClick={()=>{
-                      const newTerms=lcs.map(lc=>({lc,factor}));
-                      updateCombo(combo.id,'terms',[...combo.terms.filter(t=>t.lc),...newTerms]);
+                      const newTerms=lcs.map(lc=>({lc,factor,_key:Math.random().toString(36).slice(2)}));
+                      setCombos(prev=>prev.map(c=>c.id===combo.id
+                        ?{...c,terms:[...c.terms.filter(t=>t.lc),...newTerms]}:c));
                     }} style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px',
                       color:'#1d4ed8',padding:'3px 9px',cursor:'pointer',fontSize:'10.5px'}}>
                       {label}
@@ -3738,8 +3741,9 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                   ))}
                   {(groupedLCs['Moving (max)']||[]).length>0&&(
                     <button onClick={()=>{
-                      const newTerms=(groupedLCs['Moving (max)']||[]).map(lc=>({lc,factor:1.75}));
-                      updateCombo(combo.id,'terms',[...combo.terms.filter(t=>t.lc),...newTerms]);
+                      const newTerms=(groupedLCs['Moving (max)']||[]).map(lc=>({lc,factor:1.75,_key:Math.random().toString(36).slice(2)}));
+                      setCombos(prev=>prev.map(c=>c.id===combo.id
+                        ?{...c,terms:[...c.terms.filter(t=>t.lc),...newTerms]}:c));
                     }} style={{background:'#fef3c7',border:'1px solid #fde68a',borderRadius:'4px',
                       color:'#92400e',padding:'3px 9px',cursor:'pointer',fontSize:'10.5px'}}>
                       LL(max) × 1.75
@@ -4487,49 +4491,71 @@ function SavesModal({ cfg, onLoad, onClose,
   const [msg,            setMsg]            = useState('');
   const [confirmDel,     setConfirmDel]     = useState(null);
   const [confirmOverwrite, setConfirmOverwrite] = useState(null);
-  const [saveResults,    setSaveResults]    = useState(true); // whether to include results in save
 
   const flash = m => { setMsg(m); setTimeout(()=>setMsg(''),2500); };
 
-  const buildEntry = (existing) => ({
-    id: existing?.id || Date.now().toString(36),
-    name: existing?.name || saveName.trim(),
-    savedAt: new Date().toLocaleString(),
-    spans: cfg.spans.length,
-    totalLen: cfg.spans.reduce((a,b)=>a+b,0).toFixed(1),
-    vehicles: cfg.selectedVehicles.length,
-    sections: (cfg.sectionZones||[]).length,
-    hasResults: saveResults && (resultsRows||[]).length>0,
-    resultRows: saveResults ? (resultsRows||[]).length : 0,
-    projectName: cfg.projectName||'',
-    bridgeId: cfg.projectBridgeId||'',
-    cfg: JSON.parse(JSON.stringify(cfg)),
-    // Results state — optional, can be large
-    ...(saveResults ? {
+  const buildEntry = (existing) => {
+    const entry = {
+      id: existing?.id || Date.now().toString(36),
+      name: existing?.name || saveName.trim(),
+      savedAt: new Date().toLocaleString(),
+      spans: cfg.spans.length,
+      totalLen: cfg.spans.reduce((a,b)=>a+b,0).toFixed(1),
+      vehicles: cfg.selectedVehicles.length,
+      sections: (cfg.sectionZones||[]).length,
+      hasResults: (resultsRows||[]).length>0,
+      resultRows: (resultsRows||[]).length,
+      projectName: cfg.projectName||'',
+      bridgeId: cfg.projectBridgeId||'',
+      cfg: JSON.parse(JSON.stringify(cfg)),
       resultsRows:    JSON.parse(JSON.stringify(resultsRows||[])),
       resultsCombos:  JSON.parse(JSON.stringify(resultsCombos||[])),
       ratingCapZones: JSON.parse(JSON.stringify(ratingCapZones||[])),
-    } : {}),
-  });
+    };
+    return entry;
+  };
 
   const doSave = () => {
     if (!saveName.trim()) { flash('Enter a name first'); return; }
     const existing = saves.find(s=>s.name===saveName.trim());
     if (existing && !window.confirm(`"${saveName.trim()}" already exists. Overwrite?`)) return;
     let entry;
-    try { entry = buildEntry(existing); } catch(e) { flash('⚠ Results too large — try saving without results'); return; }
+    try {
+      entry = buildEntry(existing);
+      // Test serialization size — fall back to cfg-only if too large
+      const test = JSON.stringify([entry, ...saves.filter(s=>s.name!==saveName.trim())]);
+      if (test.length > 4_500_000) throw new Error('too large');
+    } catch(e) {
+      // Results too large — save cfg only
+      try {
+        entry = {...buildEntry(existing), resultsRows:[], resultsCombos:[], ratingCapZones:[], hasResults:false, resultRows:0};
+      } catch(e2) { flash('⚠ Save failed — config too large'); return; }
+      flash('⚠ Results omitted (too large for browser storage) — config saved');
+      const updated = [entry, ...saves.filter(s=>s.name!==saveName.trim())];
+      if (writeSaves(updated)) setSaves(updated);
+      return;
+    }
     const updated = [entry, ...saves.filter(s=>s.name!==saveName.trim())];
-    if (writeSaves(updated)) { setSaves(updated); flash(`✓ Saved "${entry.name}"${entry.hasResults?` · ${entry.resultRows} result rows`:''}`);}
-    else flash('⚠ localStorage full — try saving without results or delete old saves');
+    if (writeSaves(updated)) {
+      setSaves(updated);
+      flash(`✓ Saved "${entry.name}"${entry.hasResults ? ` · ${entry.resultRows} result rows` : ' · no results'}`);
+    } else flash('⚠ localStorage full — delete old saves to free space');
   };
 
   const doOverwrite = (entry) => {
-    let updated;
-    try { updated = saves.map(s=>s.id===entry.id ? buildEntry(entry) : s); } catch(e) { flash('⚠ Results too large'); return; }
+    let newEntry;
+    try {
+      newEntry = buildEntry(entry);
+      const test = JSON.stringify(saves.map(s=>s.id===entry.id?newEntry:s));
+      if (test.length > 4_500_000) throw new Error('too large');
+    } catch(e) {
+      newEntry = {...buildEntry(entry), resultsRows:[], resultsCombos:[], ratingCapZones:[], hasResults:false, resultRows:0};
+    }
+    const updated = saves.map(s=>s.id===entry.id ? newEntry : s);
     if (writeSaves(updated)) {
       setSaves(updated);
       setConfirmOverwrite(null);
-      flash(`✓ Updated "${entry.name}"`);
+      flash(`✓ Updated "${newEntry.name}"${newEntry.hasResults?` · ${newEntry.resultRows} rows`:''}`);
     } else flash('⚠ localStorage full');
   };
 
@@ -4593,32 +4619,24 @@ function SavesModal({ cfg, onLoad, onClose,
               💾 Save
             </button>
           </div>
-          <div style={{marginTop:'8px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
-            <label style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'11px',color:'#6b7280',cursor:'pointer'}}>
-              <input type="checkbox" checked={saveResults} onChange={e=>setSaveResults(e.target.checked)} style={{accentColor:'#1d4ed8'}}/>
-              Include results data
-              {(resultsRows||[]).length>0
-                ? <span style={{background:'#eff6ff',color:'#1d4ed8',borderRadius:'99px',fontSize:'9.5px',padding:'1px 6px',border:'1px solid #bfdbfe',fontFamily:'monospace'}}>
-                    {resultsRows.length} rows
-                  </span>
-                : <span style={{color:'#d1d5db',fontSize:'10px'}}>(no results loaded)</span>}
-            </label>
-            {(ratingCapZones||[]).length>0&&<span style={{fontSize:'10px',color:'#6b7280',fontFamily:'monospace'}}>· {ratingCapZones.length} cap. zone{ratingCapZones.length!==1?'s':''}</span>}
-            {(resultsCombos||[]).length>0&&<span style={{fontSize:'10px',color:'#6b7280',fontFamily:'monospace'}}>· {resultsCombos.length} combo{resultsCombos.length!==1?'s':''}</span>}
-          </div>
           {msg&&<div style={{marginTop:'7px',fontSize:'12px',fontFamily:'monospace',
             color:msg.startsWith('✓')?'#059669':msg.startsWith('⚠')?'#d97706':'#dc2626'}}>{msg}</div>}
-          {/* Metadata preview */}
-          <div style={{marginTop:'8px',display:'flex',gap:'10px',fontSize:'11px',fontFamily:'monospace',color:'#9ca3af',flexWrap:'wrap'}}>
-            {cfg.projectName&&<span style={{color:'#374151',fontWeight:'500'}}>{cfg.projectName}</span>}
-            {cfg.projectBridgeId&&<span style={{color:'#374151'}}>{cfg.projectBridgeId}</span>}
-            <span>{cfg.spans.length} span{cfg.spans.length!==1?'s':''}</span>
-            <span>·</span>
-            <span>{cfg.spans.reduce((a,b)=>a+b,0).toFixed(1)} ft</span>
-            <span>·</span>
-            <span>{(cfg.sectionZones||[]).length} section zone{(cfg.sectionZones||[]).length!==1?'s':''}</span>
-            <span>·</span>
-            <span>{cfg.selectedVehicles.length} vehicle{cfg.selectedVehicles.length!==1?'s':''}</span>
+          {/* Results status */}
+          <div style={{marginTop:'8px',display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
+            {(resultsRows||[]).length>0 ? (
+              <span style={{fontSize:'11px',color:'#059669',fontFamily:'monospace',display:'flex',alignItems:'center',gap:'5px'}}>
+                ✓ Results will be saved &nbsp;
+                <span style={{background:'#d1fae5',color:'#065f46',borderRadius:'99px',fontSize:'9.5px',padding:'1px 7px',border:'1px solid #a7f3d0'}}>
+                  {resultsRows.length} rows
+                </span>
+                {(resultsCombos||[]).length>0&&<span style={{color:'#6b7280',fontSize:'10px'}}>· {resultsCombos.length} post-proc combo{resultsCombos.length!==1?'s':''}</span>}
+                {(ratingCapZones||[]).length>0&&<span style={{color:'#6b7280',fontSize:'10px'}}>· {ratingCapZones.length} cap. zone{ratingCapZones.length!==1?'s':''}</span>}
+              </span>
+            ) : (
+              <span style={{fontSize:'11px',color:'#9ca3af',fontFamily:'monospace'}}>
+                No results loaded — paste results in Step 8 to include them
+              </span>
+            )}
           </div>
         </div>
 
@@ -4712,7 +4730,7 @@ function SavesModal({ cfg, onLoad, onClose,
         <div style={{padding:'12px 22px',borderTop:'1px solid #e5e7eb',background:'#f9fafb',
           display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
           <div style={{fontSize:'10.5px',fontFamily:'monospace',color:'#9ca3af'}}>
-            Saves store config + optional results in localStorage. Use ↓ Export on individual saves for permanent backup.
+            Saves store config + results in browser localStorage. Use ↓ Export for permanent JSON backup.
           </div>
           <button onClick={onClose} style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',
             color:'#374151',padding:'6px 16px',cursor:'pointer',fontSize:'12.5px'}}>Close</button>
@@ -4743,14 +4761,16 @@ function App() {
   const [savedMsg,setSavedMsg]=useState('');
   const [showSaves,setShowSaves]=useState(false);
   // ── Lifted Results state (survives step navigation) ───────────────────────
-  const [resultsRows,       setResultsRows]       = useState([]);
+  const [resultsRows,       setResultsRows]       = useState(()=>{
+    try { const s=localStorage.getItem('mct_results_v1'); return s?JSON.parse(s):[]; } catch(e){ return []; }
+  });
   const [resultsRawText,    setResultsRawText]     = useState('');
-  const [resultsMode,       setResultsMode]        = useState('paste');
+  const [resultsMode,       setResultsMode]        = useState(()=>{ try { const s=localStorage.getItem('mct_results_v1'); return s?'view':'paste'; } catch(e){ return 'paste'; }});
   const [resultsSelectedLC, setResultsSelectedLC]  = useState('');
-  const [resultsCfgSnap,    setResultsCfgSnap]     = useState(null);
-  const [resultsCombos,     setResultsCombos]      = useState([]); // post-proc combos
-  const [ratingCapZones,    setRatingCapZones]      = useState([]); // capacity zones for rating
-  const [reportState,       setReportState]         = useState(null); // full rating state for report
+  const [resultsCfgSnap,    setResultsCfgSnap]     = useState(()=>{ try { return localStorage.getItem('mct_results_snap_v1')||null; } catch(e){ return null; }});
+  const [resultsCombos,     setResultsCombos]      = useState(()=>{ try { const s=localStorage.getItem('mct_results_combos_v1'); return s?JSON.parse(s):[]; } catch(e){ return []; }});
+  const [ratingCapZones,    setRatingCapZones]      = useState(()=>{ try { const s=localStorage.getItem('mct_cap_zones_v1'); return s?JSON.parse(s):[]; } catch(e){ return []; }});
+  const [reportState,       setReportState]         = useState(null);
   const set=(k,v)=>setCfg(p=>({...p,[k]:v}));
   const loadCfg = newCfg => { setCfg({...DEFAULT_CFG,...newCfg}); setSavedMsg('Loaded!'); setTimeout(()=>setSavedMsg(''),2000); };
 
@@ -4771,6 +4791,47 @@ function App() {
   useEffect(()=>{
     try{localStorage.setItem('mct_cfg_v3',JSON.stringify(cfg));}catch(e){}
   },[cfg]);
+
+  // Auto-save results state to localStorage so they survive page refresh
+  useEffect(()=>{
+    try {
+      if (resultsRows.length > 0) {
+        localStorage.setItem('mct_results_v1', JSON.stringify(resultsRows));
+      } else {
+        localStorage.removeItem('mct_results_v1');
+      }
+    } catch(e) {
+      // Results too large for localStorage — silently skip (still saved in named saves)
+      console.warn('Results too large for auto-save:', e);
+    }
+  },[resultsRows]);
+
+  useEffect(()=>{
+    try {
+      if (resultsCombos.length > 0)
+        localStorage.setItem('mct_results_combos_v1', JSON.stringify(resultsCombos));
+      else
+        localStorage.removeItem('mct_results_combos_v1');
+    } catch(e) {}
+  },[resultsCombos]);
+
+  useEffect(()=>{
+    try {
+      if (ratingCapZones.length > 0)
+        localStorage.setItem('mct_cap_zones_v1', JSON.stringify(ratingCapZones));
+      else
+        localStorage.removeItem('mct_cap_zones_v1');
+    } catch(e) {}
+  },[ratingCapZones]);
+
+  useEffect(()=>{
+    try {
+      if (resultsCfgSnap)
+        localStorage.setItem('mct_results_snap_v1', resultsCfgSnap);
+      else
+        localStorage.removeItem('mct_results_snap_v1');
+    } catch(e) {}
+  },[resultsCfgSnap]);
 
   const loadDefault=()=>{if(window.confirm('Reset all inputs to defaults?'))setCfg(DEFAULT_CFG);};
   const exportJSON=()=>{
