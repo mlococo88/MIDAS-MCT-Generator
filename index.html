@@ -2337,6 +2337,33 @@ function legalLLfactor(adtt) {
   return +(1.30 + (1.45 - 1.30) * (adtt - 1000) / (5000 - 1000)).toFixed(4);
 }
 
+// Determine MBE rating category for a vehicle based on its group
+function defaultVehicleCategory(vehicleName) {
+  const grp = VEHICLE_GROUPS.find(g=>g.vehicles.some(v=>v.name===vehicleName));
+  if (!grp) return 'Design';
+  if (grp.group.toLowerCase().includes('permit')) return 'Permit';
+  if (grp.group.toLowerCase().includes('legal') || grp.group.toLowerCase().includes('posting')) return 'Legal';
+  if (grp.group.toLowerCase().includes('operating')) return 'Legal'; // operating vehicles use legal factors
+  return 'Design';
+}
+
+// Return { inv, op } γ_LL for a vehicle per MBE Table 6A.4.2.2-1
+function vehicleGamLL(category, limitState, method, adtt) {
+  if (method === 'LFR') {
+    return { inv: 2.17, op: 1.30 };
+  }
+  const ls = LRFR_FACTORS.LRFR[limitState] || LRFR_FACTORS.LRFR['Strength I'];
+  if (category === 'Legal') {
+    const ll = legalLLfactor(adtt);
+    return { inv: ll, op: ll }; // Legal: same factor, level expressed through RF interpretation
+  }
+  if (category === 'Permit') {
+    return { inv: ls.Permit?.LL ?? 1.10, op: ls.Permit?.LL ?? 1.10 };
+  }
+  // Design
+  return { inv: ls.Inventory?.LL ?? 1.75, op: ls.Operating?.LL ?? 1.35 };
+}
+
 function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, setMode,
     selectedLoadProp, setSelectedLoadProp, cfgSnap, setCfgSnap,
     resultsCombos, setResultsCombos,
@@ -2610,15 +2637,31 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
     setVehicleLCMap(prev=>{
       const next = {...prev};
       (cfg.selectedVehicles||[]).forEach(vn=>{
-        if (next[vn]?.posLC) return; // don't overwrite manual selections
-        const posLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(max)')||lc.includes('max')))
-                   || loadedLCs.find(lc=>lc.includes(vn));
-        const negLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(min)')||lc.includes('min')));
-        if (posLC) next[vn] = { posLC, negLC: negLC||'' };
+        const existing = next[vn]||{};
+        // Auto-detect LCs if not already assigned
+        const posLC = existing.posLC || (
+          loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(max)')||lc.includes('max')))
+          || loadedLCs.find(lc=>lc.includes(vn))
+        );
+        const negLC = existing.negLC !== undefined ? existing.negLC : (
+          loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(min)')||lc.includes('min'))) || ''
+        );
+        // Auto-assign category and gamLL if not manually set
+        const category = existing.category || defaultVehicleCategory(vn);
+        const { inv: gamLLinv, op: gamLLop } = vehicleGamLL(
+          category, ratingLimitState, ratingMethod, ratingAdtt
+        );
+        next[vn] = {
+          posLC: posLC||'', negLC,
+          category,
+          gamLLinv:  existing.gamLLinv  !== undefined ? existing.gamLLinv  : +gamLLinv.toFixed(4),
+          gamLLop:   existing.gamLLop   !== undefined ? existing.gamLLop   : +gamLLop.toFixed(4),
+          customGam: existing.customGam || false,
+        };
       });
       return next;
     });
-  }, [origRows.length, JSON.stringify(cfg?.selectedVehicles)]);
+  }, [origRows.length, JSON.stringify(cfg?.selectedVehicles), ratingLimitState, ratingMethod, ratingAdtt]);
 
   const envelopeData = useMemo(()=>{
     if (!envelopeLCs.length || !rows.length) return {};
@@ -2756,7 +2799,6 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
       return { name:vn, label:veh?.label||vn, tons:tons||0, ...lcAssign };
     });
 
-    // Only rate vehicles that have at least a max LC assigned
     const ratable = vehicles.filter(v=>v.posLC);
 
     const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
@@ -2764,6 +2806,10 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
       .sort((a,b)=>nodePositions[a]-nodePositions[b]);
 
     return ratable.map(veh=>{
+      // Use per-vehicle gamLL if defined, otherwise fall back to global
+      const vGamLLinv = veh.gamLLinv != null ? veh.gamLLinv : gamLL;
+      const vGamLLop  = veh.gamLLop  != null ? veh.gamLLop  : gamLL_op;
+
       const nodeResults = nodeList.map(node=>{
         const xPos = nodePositions[node]??0;
         const dc  = ratingDcLC ? origRows.find(r=>r.load===ratingDcLC &&r.node===node) : null;
@@ -2784,8 +2830,8 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
         const Cvn    = phiC * phiS * ratingPhiV * cap.Vn;
 
         const p = { Mdc, Mdw, Vdc, Vdw, Mllpos, Mllneg, Vll, CmnPos, CmnNeg, Cvn };
-        const inv = computeNodeRF(p, gamDC, gamDW, gamLL,    ratingLLScale);
-        const op  = computeNodeRF(p, gamDC, gamDW, gamLL_op, ratingLLScale);
+        const inv = computeNodeRF(p, gamDC, gamDW, vGamLLinv, ratingLLScale);
+        const op  = computeNodeRF(p, gamDC, gamDW, vGamLLop,  ratingLLScale);
         return { node, pos:xPos, inv, op, CmnPos:+CmnPos.toFixed(1), CmnNeg:+CmnNeg.toFixed(1), Cvn:+Cvn.toFixed(1) };
       }).filter(Boolean);
 
@@ -2798,6 +2844,8 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
       return {
         name:veh.name, label:veh.label, tons,
         posLC: veh.posLC, negLC: veh.negLC,
+        category: veh.category||'Design',
+        gamLLinv: vGamLLinv, gamLLop: vGamLLop,
         invRF:    +govInv.inv.rfGov.toFixed(3),
         invTons:  tons ? +(govInv.inv.rfGov * tons).toFixed(1) : null,
         invGoverns: govInv.inv.governs,
@@ -4006,28 +4054,29 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                 </div>
                 <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
                   {/* Header */}
-                  <div style={{display:'grid',gridTemplateColumns:'180px 1fr 1fr 80px',gap:'8px',
+                  <div style={{display:'grid',gridTemplateColumns:'160px 1fr 1fr 100px 130px 80px',gap:'8px',
                     padding:'5px 8px',fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',
                     textTransform:'uppercase',letterSpacing:'0.06em'}}>
                     <span>Vehicle</span>
-                    <span>LL Max LC (positive moment)</span>
-                    <span>LL Min LC (negative moment, optional)</span>
+                    <span>LL Max LC</span>
+                    <span>LL Min LC (optional)</span>
+                    <span>Category</span>
+                    <span>γ_LL (Inv / Op)</span>
                     <span>GVW (T)</span>
                   </div>
                   {(cfg?.selectedVehicles||[]).map(vn=>{
                     const veh = ALL_VEHICLES.find(v=>v.name===vn);
                     const assign = vehicleLCMap[vn]||{};
                     const loadedLCs = [...new Set(origRows.map(r=>r.load))];
-                    const movMax = loadedLCs.filter(lc=>lc.includes('(max)')||groupedLCs['Moving (max)']?.includes(lc));
-                    const movMin = loadedLCs.filter(lc=>lc.includes('(min)')||groupedLCs['Moving (min)']?.includes(lc));
-                    const allMoving = loadedLCs.filter(lc=>
-                      groupedLCs['Moving (max)']?.includes(lc)||
-                      groupedLCs['Moving (min)']?.includes(lc)||
-                      groupedLCs['Moving (all)']?.includes(lc));
                     const hasPos = !!assign.posLC;
                     const tons = VEHICLE_TONS[vn];
+                    const cat = assign.category || defaultVehicleCategory(vn);
+                    const catColor = cat==='Permit'?'#be123c':cat==='Legal'?'#6d28d9':'#1d4ed8';
+                    const catBg   = cat==='Permit'?'#fff1f2':cat==='Legal'?'#f5f3ff':'#eff6ff';
+                    // Recompute default gamLL when category changes
+                    const defaultGam = vehicleGamLL(cat, ratingLimitState, ratingMethod, ratingAdtt);
                     return (
-                      <div key={vn} style={{display:'grid',gridTemplateColumns:'180px 1fr 1fr 80px',gap:'8px',
+                      <div key={vn} style={{display:'grid',gridTemplateColumns:'160px 1fr 1fr 100px 130px 80px',gap:'8px',
                         alignItems:'center',padding:'8px',borderRadius:'6px',
                         background:hasPos?'#fff':'#fffbeb',border:`1px solid ${hasPos?'#e5e7eb':'#fde68a'}`}}>
                         <div>
@@ -4042,7 +4091,7 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                           <optgroup label="Moving (max)">
                             {(groupedLCs['Moving (max)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
                           </optgroup>
-                          <optgroup label="All Moving">
+                          <optgroup label="Moving (all)">
                             {(groupedLCs['Moving (all)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
                           </optgroup>
                           <optgroup label="Computed Combos">
@@ -4060,6 +4109,58 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                             {(groupedLCs['Moving (all)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
                           </optgroup>
                         </select>
+                        {/* Category selector */}
+                        <select value={cat}
+                          onChange={e=>{
+                            const newCat = e.target.value;
+                            const newGam = vehicleGamLL(newCat, ratingLimitState, ratingMethod, ratingAdtt);
+                            setVehicleLCMap(prev=>({...prev,[vn]:{
+                              ...(prev[vn]||{}),
+                              category:newCat,
+                              gamLLinv: +newGam.inv.toFixed(4),
+                              gamLLop:  +newGam.op.toFixed(4),
+                              customGam: false,
+                            }}));
+                          }}
+                          style={{...INP,fontSize:'11.5px',fontWeight:'600',
+                            color:catColor,background:catBg,border:`1px solid ${catColor}40`}}>
+                          <option value="Design">Design</option>
+                          <option value="Legal">Legal</option>
+                          <option value="Permit">Permit</option>
+                        </select>
+                        {/* γ_LL inputs */}
+                        <div style={{display:'flex',flexDirection:'column',gap:'3px'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
+                            <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',width:'22px'}}>Inv</span>
+                            <input type="number" step="0.05" min="0" max="3"
+                              value={assign.gamLLinv!=null?assign.gamLLinv:defaultGam.inv}
+                              onChange={e=>setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),
+                                gamLLinv:parseFloat(e.target.value)||0, customGam:true}}))}
+                              style={{...INP2,width:'64px',textAlign:'right',fontFamily:'monospace',
+                                fontWeight:'600',fontSize:'11px',
+                                background:assign.customGam?'#fffbeb':'#fff'}}/>
+                          </div>
+                          <div style={{display:'flex',alignItems:'center',gap:'3px'}}>
+                            <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',width:'22px'}}>Op</span>
+                            <input type="number" step="0.05" min="0" max="3"
+                              value={assign.gamLLop!=null?assign.gamLLop:defaultGam.op}
+                              onChange={e=>setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),
+                                gamLLop:parseFloat(e.target.value)||0, customGam:true}}))}
+                              style={{...INP2,width:'64px',textAlign:'right',fontFamily:'monospace',
+                                fontWeight:'600',fontSize:'11px',
+                                background:assign.customGam?'#fffbeb':'#fff'}}/>
+                          </div>
+                          {assign.customGam&&(
+                            <button onClick={()=>{
+                              const g=vehicleGamLL(cat,ratingLimitState,ratingMethod,ratingAdtt);
+                              setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),
+                                gamLLinv:+g.inv.toFixed(4),gamLLop:+g.op.toFixed(4),customGam:false}}));
+                            }} style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',
+                              background:'none',border:'none',cursor:'pointer',padding:'0',textAlign:'left'}}>
+                              ↺ reset
+                            </button>
+                          )}
+                        </div>
                         <div style={{textAlign:'center',fontFamily:'monospace',fontSize:'12px',
                           color:tons?'#374151':'#9ca3af',fontWeight:tons?'600':'400'}}>
                           {tons?tons+' T':'—'}
@@ -4118,12 +4219,13 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                         <tr style={{background:'#f9fafb'}}>
                           <th rowSpan="2" style={{padding:'8px 12px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Vehicle</th>
                           <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>GVW (T)</th>
-                          <th rowSpan="2" style={{padding:'8px 10px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'10px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb',maxWidth:'160px'}}>LL Result Case</th>
+                          <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Category</th>
+                          <th rowSpan="2" style={{padding:'8px 10px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'10px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb',maxWidth:'140px'}}>LL Result Case</th>
                           <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#1d4ed8',fontSize:'11px',borderBottom:'1px solid #bfdbfe',background:'#eff6ff',borderRight:'1px solid #e5e7eb'}}>
-                            Inventory (γ_LL={gamLL})
+                            Inventory
                           </th>
                           <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#7c3aed',fontSize:'11px',borderBottom:'1px solid #ddd6fe',background:'#f5f3ff'}}>
-                            Operating (γ_LL={gamLL_op.toFixed(2)})
+                            Operating
                           </th>
                         </tr>
                         <tr style={{background:'#f9fafb'}}>
@@ -4138,6 +4240,8 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                       <tbody>
                         {multiVehicleData.map((v,i)=>{
                           const invOk=v.invRF>=1, opOk=v.opRF>=1;
+                          const catColor = v.category==='Permit'?'#be123c':v.category==='Legal'?'#6d28d9':'#1d4ed8';
+                          const catBg   = v.category==='Permit'?'#fff1f2':v.category==='Legal'?'#f5f3ff':'#eff6ff';
                           return (
                             <tr key={v.name} style={{borderBottom:'1px solid #f3f4f6',background:i%2===0?'#fff':'#fafafa'}}>
                               <td style={{padding:'8px 12px',fontWeight:'600',color:'#111827',borderRight:'1px solid #e5e7eb'}}>
@@ -4147,15 +4251,23 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                               <td style={{padding:'8px 10px',textAlign:'center',borderRight:'1px solid #e5e7eb',color:v.tons?'#374151':'#9ca3af'}}>
                                 {v.tons?v.tons+' T':'—'}
                               </td>
-                              <td style={{padding:'8px 10px',fontSize:'10px',borderRight:'1px solid #e5e7eb',maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
-                                title={v.posLC}>
-                                <div style={{color:'#374151'}}>{v.posLC?.replace(/_[^_]+$/,'').slice(0,30)||'—'}</div>
-                                {v.negLC&&<div style={{color:'#9ca3af',fontSize:'9px'}}>min: {v.negLC?.replace(/_[^_]+$/,'').slice(0,25)}</div>}
+                              <td style={{padding:'8px 10px',textAlign:'center',borderRight:'1px solid #e5e7eb'}}>
+                                <span style={{fontSize:'10px',fontWeight:'700',color:catColor,
+                                  background:catBg,padding:'2px 8px',borderRadius:'99px',
+                                  border:`1px solid ${catColor}30`}}>{v.category}</span>
                               </td>
-                              {/* Inventory */}
+                              <td style={{padding:'8px 10px',fontSize:'10px',borderRight:'1px solid #e5e7eb',maxWidth:'140px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                                title={v.posLC}>
+                                <div style={{color:'#374151'}}>{v.posLC?.replace(/_[^_]+$/,'').slice(0,28)||'—'}</div>
+                                {v.negLC&&<div style={{color:'#9ca3af',fontSize:'9px'}}>min: {v.negLC?.replace(/_[^_]+$/,'').slice(0,22)}</div>}
+                              </td>
+                              {/* Inventory — show per-vehicle γ_LL */}
                               <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
                                 color:invOk?'#059669':v.invRF>=0.3?'#d97706':'#dc2626',background:'#f8fbff'}}>
                                 {v.invRF.toFixed(3)}
+                                <div style={{fontSize:'8.5px',fontWeight:'400',color:'#9ca3af',fontFamily:'monospace'}}>
+                                  γ_LL={v.gamLLinv}
+                                </div>
                               </td>
                               <td style={{padding:'8px 10px',textAlign:'center',color:invOk?'#059669':'#dc2626',fontWeight:'600',background:'#f8fbff'}}>
                                 {v.invTons!=null?v.invTons+' T':'—'}
@@ -4166,10 +4278,13 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                               <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10px',color:'#6b7280',background:'#f8fbff',borderRight:'1px solid #e5e7eb'}}>
                                 N{v.invNode}·{v.invPos.toFixed(1)}ft
                               </td>
-                              {/* Operating */}
+                              {/* Operating — show per-vehicle γ_LL */}
                               <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
                                 color:opOk?'#059669':v.opRF>=0.3?'#d97706':'#dc2626',background:'#fbf8ff'}}>
                                 {v.opRF.toFixed(3)}
+                                <div style={{fontSize:'8.5px',fontWeight:'400',color:'#9ca3af',fontFamily:'monospace'}}>
+                                  γ_LL={v.gamLLop}
+                                </div>
                               </td>
                               <td style={{padding:'8px 10px',textAlign:'center',color:opOk?'#059669':'#dc2626',fontWeight:'600',background:'#fbf8ff'}}>
                                 {v.opTons!=null?v.opTons+' T':'—'}
