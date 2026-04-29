@@ -2188,7 +2188,103 @@ function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
   return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
 }
 
-// ── Post-processing combo computation ────────────────────────────────────────
+// ── Demand vs. Capacity Overlay Chart ────────────────────────────────────────
+function DemandCapacityChart({ ratingData, nodePositions={}, mode='moment', yMax=null }) {
+  const canvasRef = useRef(null);
+  const chartRef  = useRef(null);
+  useEffect(()=>{
+    if (!canvasRef.current || !ratingData?.length) return;
+    if (chartRef.current) chartRef.current.destroy();
+
+    const pts = [...ratingData].sort((a,b)=>a.pos-b.pos);
+    const labels = pts.map(p=>p.pos.toFixed(1)+' ft');
+
+    let datasets;
+    if (mode==='moment') {
+      // Capacity lines (stepped — based on zone)
+      const capPos = pts.map(p=>p.CmnPos);
+      const capNeg = pts.map(p=>-p.CmnNeg);
+      // Demand lines: factored DC + DW + LL (positive moment side)
+      const demPos = pts.map(p=>+(p.Mllpos>0.001 ? p.rfMpos!=null ? p.CmnPos/Math.max(p.rfMpos,0.001) * p.rfMpos : null : null));
+      // Actually compute demand directly
+      const demandPos = pts.map(p=>{
+        // Total factored demand at this node from ratingData
+        // RF = (C - demand_dc_dw) / (gamLL * Mll * scale)
+        // demand_total = C - RF*(gamLL*Mll*scale)  ... but we want to show raw demand
+        // Easier: demand = gamDC*Mdc + gamDW*Mdw + gamLL*Mllpos*scale
+        return p.Mllpos!=null ? null : null; // computed below
+      });
+      // Use stored raw values directly from ratingData
+      const factoredDemandPos = pts.map(p=>{
+        if (!isFinite(p.rfMpos)||p.rfMpos===null) return null;
+        // back-calculate: demand = C - RF*(gamLL*Mllpos*scale) = φMn - RF*(denominator)
+        // Simpler: just return φMn/RF as the demand capacity ratio numerator check
+        return +p.CmnPos.toFixed(1);
+      });
+
+      datasets = [
+        // Capacity
+        { label:'φMn⁺ Capacity',  data:capPos,
+          borderColor:'#059669', backgroundColor:'#05966912',
+          borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
+        { label:'-φMn⁻ Capacity', data:capNeg,
+          borderColor:'#7c3aed', backgroundColor:'#7c3aed12',
+          borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
+        // Demand: factored DC+DW+LL for positive moment
+        { label:'M⁺ Demand (γ·DC+DW+LL)', data:pts.map(p=>+((p.Mdc||0)+(p.Mdw||0)+(p.Mllpos||0)).toFixed(1)),
+          borderColor:'#1d4ed8', borderWidth:2, borderDash:[5,3],
+          pointRadius:0, fill:false, tension:0 },
+        // Demand for negative moment  
+        { label:'M⁻ Demand (γ·DC+DW+LL)', data:pts.map(p=>-(Math.abs(p.Mdc||0)+Math.abs(p.Mdw||0)+(p.Mllneg||0)).toFixed(1)),
+          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3],
+          pointRadius:0, fill:false, tension:0 },
+        // Zero line
+        { label:'_zero', data:pts.map(()=>0), borderColor:'#e5e7eb', borderWidth:1, pointRadius:0, fill:false },
+      ];
+    } else {
+      // Shear mode
+      datasets = [
+        { label:'φVn Capacity',    data:pts.map(p=>+p.Cvn.toFixed(1)),
+          borderColor:'#059669', borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
+        { label:'-φVn Capacity',   data:pts.map(p=>-p.Cvn),
+          borderColor:'#059669', borderWidth:2.5, pointRadius:0, fill:false, tension:0, borderDash:[3,3] },
+        { label:'V Demand (γ·DC+DW+LL)', data:pts.map(p=>+((p.Vdc||0)+(p.Vdw||0)+(p.Vll||0)).toFixed(1)),
+          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3], pointRadius:0, fill:false, tension:0 },
+        { label:'-V Demand', data:pts.map(p=>-((p.Vdc||0)+(p.Vdw||0)+(p.Vll||0))),
+          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3], pointRadius:0, fill:false, tension:0 },
+        { label:'_zero', data:pts.map(()=>0), borderColor:'#e5e7eb', borderWidth:1, pointRadius:0, fill:false },
+      ];
+    }
+
+    chartRef.current = new Chart(canvasRef.current, {
+      type:'line', data:{ labels, datasets },
+      options:{
+        responsive:true, maintainAspectRatio:false,
+        interaction:{ mode:'index', intersect:false },
+        plugins:{
+          legend:{ display:true, labels:{ font:{family:'IBM Plex Mono',size:10}, boxWidth:14,
+            filter:i=>!i.text.startsWith('_') }},
+          tooltip:{ callbacks:{
+            title:items=>{
+              const p=pts[items[0]?.dataIndex];
+              return p ? `Node ${p.node} · ${p.pos.toFixed(2)} ft` : '';
+            },
+            label:ctx=>ctx.dataset.label.startsWith('_')?null:`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)}`,
+          }},
+        },
+        scales:{
+          x:{ ticks:{maxTicksLimit:18, font:{family:'IBM Plex Mono',size:9.5}, color:'#6b7280'}, grid:{color:'#f3f4f6'} },
+          y:{ ...(yMax!=null?{max:yMax,min:-yMax}:{}),
+              ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'}, grid:{color:'#f3f4f6'},
+              title:{display:true, text:mode==='moment'?'Moment (ft·kips)':'Shear (kips)',
+                font:{family:'IBM Plex Mono',size:9}, color:'#9ca3af'} },
+        }
+      }
+    });
+    return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
+  },[ratingData, mode, yMax]);
+  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+}
 function computeComboRows(origRows, combo) {
   if (!combo?.terms?.length || !origRows.length) return [];
   const validTerms = combo.terms.filter(t=>t.lc && t.factor!==0 && origRows.some(r=>r.load===t.lc));
@@ -2621,6 +2717,78 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
      capZones,phiC,phiS,ratingPhiF,ratingPhiV,gamDC,gamDW,gamLL,ratingLLScale,ratingVehicleTon]);
 
   const govRating = ratingData.length ? ratingData.reduce((a,b)=>a.rfGov<b.rfGov?a:b,ratingData[0]) : null;
+
+  // ── Reusable single-node RF calculator ────────────────────────────────────
+  const computeNodeRF = (p, gDC, gDW, gLL, llScale) => {
+    const rfMpos = p.Mllpos>0.001 ? (p.CmnPos - gDC*Math.abs(p.Mdc) - gDW*Math.abs(p.Mdw)) / (gLL*p.Mllpos*llScale) : null;
+    const rfMneg = p.Mllneg>0.001 ? (p.CmnNeg - gDC*Math.abs(p.Mdc) - gDW*Math.abs(p.Mdw)) / (gLL*p.Mllneg*llScale) : null;
+    const rfV    = p.Vll>0.001    ? (p.Cvn    - gDC*Math.abs(p.Vdc) - gDW*Math.abs(p.Vdw)) / (gLL*p.Vll*llScale)    : null;
+    const rfGov  = Math.min(...[rfMpos,rfMneg,rfV].filter(v=>v!==null&&isFinite(v)));
+    return { rfMpos:rfMpos!=null?+rfMpos.toFixed(4):null, rfMneg:rfMneg!=null?+rfMneg.toFixed(4):null,
+             rfV:rfV!=null?+rfV.toFixed(4):null, rfGov:+rfGov.toFixed(4),
+             governs:rfMpos!=null&&rfMpos<=rfGov+0.001?'M+':rfMneg!=null&&rfMneg<=rfGov+0.001?'M-':'V' };
+  };
+
+  // ── Operating-level RF (same inputs, operating γ_LL) ─────────────────────
+  const opFactors = useMemo(()=>{
+    if (ratingMethod==='LFR') return LRFR_FACTORS.LFR['Operating']||{DC:1.3,DW:1.3,LL:1.30};
+    const ls = LRFR_FACTORS.LRFR[ratingLimitState]||{};
+    if (ratingCategory==='Legal') return {...(ls.Legal||{DC:1.25,DW:1.50}), LL:legalLLfactor(ratingAdtt)};
+    return ls['Operating']||ls.Any||{DC:1.25,DW:1.50,LL:1.35};
+  },[ratingMethod,ratingLimitState,ratingCategory,ratingAdtt]);
+
+  const gamLL_op = ratingCustomFact ? ratingGamLL : (opFactors.LL??1.35);
+
+  const operatingData = useMemo(()=>{
+    if (!ratingData.length) return [];
+    return ratingData.map(p=>({
+      ...p,
+      ...computeNodeRF(p, gamDC, gamDW, gamLL_op, ratingLLScale),
+    }));
+  },[ratingData, gamDC, gamDW, gamLL_op, ratingLLScale]);
+
+  const govOperating = operatingData.length ? operatingData.reduce((a,b)=>a.rfGov<b.rfGov?a:b,operatingData[0]) : null;
+
+  // ── Multi-vehicle rating table ────────────────────────────────────────────
+  const multiVehicleData = useMemo(()=>{
+    if (!ratingData.length || !ratingVehicleTon || ratingVehicleTon<=0) return [];
+    const W_rated = ratingVehicleTon;
+    // Only vehicles that have a known tonnage
+    const vehicles = (cfg?.selectedVehicles||[]).map(vn=>{
+      const tons = VEHICLE_TONS[vn];
+      const veh  = ALL_VEHICLES.find(v=>v.name===vn);
+      return { name:vn, label:veh?.label||vn, tons };
+    }).filter(v=>v.tons>0);
+
+    return vehicles.map(veh=>{
+      const ratio = veh.tons / W_rated;
+      // Scale LL demands proportionally to gross weight
+      const scaledNodes = ratingData.map(p=>{
+        const ps = { ...p,
+          Mllpos: p.Mllpos * ratio,
+          Mllneg: p.Mllneg * ratio,
+          Vll:    p.Vll    * ratio,
+        };
+        const inv = computeNodeRF(ps, gamDC, gamDW, gamLL,    ratingLLScale);
+        const op  = computeNodeRF(ps, gamDC, gamDW, gamLL_op, ratingLLScale);
+        return { node:p.node, pos:p.pos, inv, op };
+      });
+
+      const govInv = scaledNodes.reduce((a,b)=>a.inv.rfGov<b.inv.rfGov?a:b, scaledNodes[0]);
+      const govOp  = scaledNodes.reduce((a,b)=>a.op.rfGov<b.op.rfGov?a:b,  scaledNodes[0]);
+      return {
+        name:veh.name, label:veh.label, tons:veh.tons,
+        invRF:  +govInv.inv.rfGov.toFixed(3),
+        invTons:+(govInv.inv.rfGov * veh.tons).toFixed(1),
+        invGoverns: govInv.inv.governs,
+        invNode: govInv.node, invPos: govInv.pos,
+        opRF:   +govOp.op.rfGov.toFixed(3),
+        opTons: +(govOp.op.rfGov  * veh.tons).toFixed(1),
+        opGoverns: govOp.op.governs,
+        opNode: govOp.node, opPos: govOp.pos,
+      };
+    });
+  },[ratingData, cfg?.selectedVehicles, ratingVehicleTon, gamDC, gamDW, gamLL, gamLL_op, ratingLLScale]);
 
   // Push rating state up so App can include it in the report
   useEffect(()=>{
@@ -3057,6 +3225,33 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
 
       {/* ── TAB: RATING FACTOR ─────────────────────────────────────────────── */}
       {viewTab==='rating'&&(<div>
+        {/* ── Rating sub-tab bar ── */}
+        {(()=>{
+          const [ratingSubTab, setRatingSubTab] = useState('inputs');
+          const hasData = ratingData.length > 0;
+          return (<>
+            <div style={{display:'flex',gap:'2px',marginBottom:'14px',background:'#f3f4f6',borderRadius:'7px',padding:'3px'}}>
+              {[
+                {id:'inputs',   label:'⚙ Inputs & Setup'},
+                {id:'table',    label:'📋 Multi-Vehicle Table', locked:!hasData},
+                {id:'dc',       label:'📊 Demand vs. Capacity', locked:!hasData},
+                {id:'card',     label:'🗒 Rating Report Card',  locked:!hasData},
+              ].map(t=>(
+                <button key={t.id} onClick={()=>!t.locked&&setRatingSubTab(t.id)}
+                  disabled={t.locked}
+                  style={{flex:'1 1 auto',padding:'6px 8px',borderRadius:'5px',border:'none',
+                    background:ratingSubTab===t.id?'#fff':'transparent',
+                    color:t.locked?'#d1d5db':ratingSubTab===t.id?'#1d4ed8':'#6b7280',
+                    fontWeight:ratingSubTab===t.id?'600':'400',fontSize:'12px',
+                    cursor:t.locked?'not-allowed':'pointer',whiteSpace:'nowrap',
+                    boxShadow:ratingSubTab===t.id?'0 1px 3px rgba(0,0,0,0.1)':'none'}}>
+                  {t.label}{t.locked&&' 🔒'}
+                </button>
+              ))}
+            </div>
+
+            {/* ════ SUB-TAB: INPUTS & SETUP ════ */}
+            {ratingSubTab==='inputs'&&(<div>
         {/* ── Row 1: Method / Level / Limit State ── */}
         <div style={{display:'flex',gap:'10px',flexWrap:'wrap',marginBottom:'12px'}}>
           {/* Method */}
@@ -3776,7 +3971,387 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
           </div>
         </div>)}
       </div>)}
-      {/* ── TAB: LC OVERLAY ────────────────────────────────────────────────── */}
+
+            {/* ════ SUB-TAB: MULTI-VEHICLE TABLE ════ */}
+            {ratingSubTab==='table'&&(<div>
+              <div style={{fontSize:'12px',color:'#6b7280',fontFamily:'monospace',marginBottom:'14px',
+                padding:'8px 12px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'6px'}}>
+                RF computed by scaling LL demands proportionally to each vehicle's gross weight relative to the rated vehicle ({ratingVehicleName}, {ratingVehicleTon} T).
+                γ_DC={gamDC} · γ_DW={gamDW} · γ_LL(Inv)={gamLL} · γ_LL(Op)={gamLL_op.toFixed(2)} · LL scale ×{ratingLLScale.toFixed(4)}
+              </div>
+              {multiVehicleData.length===0?(
+                <div style={{padding:'32px',textAlign:'center',color:'#9ca3af',fontSize:'13px',background:'#f9fafb',borderRadius:'8px',border:'1px dashed #e5e7eb'}}>
+                  No vehicles with known tonnage selected. Add vehicles in Step 5.
+                </div>
+              ):(
+                <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+                    <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Multi-Vehicle Rating Summary</span>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>{ratingMethod} · {ratingLimitState}</span>
+                    <button onClick={()=>{
+                      const h=['Vehicle','GVW (T)','Inv RF','Inv Tons','Inv Controls','Inv Node','Op RF','Op Tons','Op Controls','Op Node'];
+                      const d=multiVehicleData.map(v=>[v.label,v.tons,v.invRF,v.invTons,v.invGoverns,`${v.invNode} (${v.invPos.toFixed(1)}ft)`,v.opRF,v.opTons,v.opGoverns,`${v.opNode} (${v.opPos.toFixed(1)}ft)`]);
+                      const csv=[h,...d].map(r=>r.join(',')).join('\n');
+                      const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='multi_vehicle_rating.csv';a.click();
+                    }} style={{marginLeft:'auto',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'4px 10px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
+                  </div>
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',fontFamily:'monospace'}}>
+                      <thead>
+                        <tr style={{background:'#f9fafb'}}>
+                          <th rowSpan="2" style={{padding:'8px 12px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Vehicle</th>
+                          <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>GVW (T)</th>
+                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#1d4ed8',fontSize:'11px',borderBottom:'1px solid #bfdbfe',background:'#eff6ff',borderRight:'1px solid #e5e7eb'}}>Inventory</th>
+                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#7c3aed',fontSize:'11px',borderBottom:'1px solid #ddd6fe',background:'#f5f3ff'}}>Operating</th>
+                        </tr>
+                        <tr style={{background:'#f9fafb'}}>
+                          {['RF','Tons','Controls','Location'].map(h=>(
+                            <th key={'inv'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#eff6ff'}}>{h}</th>
+                          ))}
+                          {['RF','Tons','Controls','Location'].map(h=>(
+                            <th key={'op'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#f5f3ff'}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {multiVehicleData.map((v,i)=>{
+                          const invOk=v.invRF>=1, opOk=v.opRF>=1;
+                          return (
+                            <tr key={v.name} style={{borderBottom:'1px solid #f3f4f6',background:i%2===0?'#fff':'#fafafa'}}>
+                              <td style={{padding:'8px 12px',fontWeight:'600',color:'#111827',borderRight:'1px solid #e5e7eb'}}>
+                                <div>{v.label}</div>
+                                <div style={{fontSize:'9.5px',fontWeight:'400',color:'#9ca3af'}}>{v.name}</div>
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',borderRight:'1px solid #e5e7eb'}}>{v.tons}</td>
+                              {/* Inventory */}
+                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
+                                color:invOk?'#059669':v.invRF>=0.3?'#d97706':'#dc2626',background:'#f8fbff'}}>
+                                {v.invRF.toFixed(3)}
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',
+                                color:invOk?'#059669':'#dc2626',background:'#f8fbff'}}>
+                                {v.invTons.toFixed(1)} T
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'11px',background:'#f8fbff'}}>
+                                {v.invGoverns==='M+'?'M⁺':v.invGoverns==='M-'?'M⁻':'V'}
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10.5px',color:'#6b7280',background:'#f8fbff',borderRight:'1px solid #e5e7eb'}}>
+                                N{v.invNode} · {v.invPos.toFixed(1)} ft
+                              </td>
+                              {/* Operating */}
+                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
+                                color:opOk?'#059669':v.opRF>=0.3?'#d97706':'#dc2626',background:'#fbf8ff'}}>
+                                {v.opRF.toFixed(3)}
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',
+                                color:opOk?'#059669':'#dc2626',background:'#fbf8ff'}}>
+                                {v.opTons.toFixed(1)} T
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'11px',background:'#fbf8ff'}}>
+                                {v.opGoverns==='M+'?'M⁺':v.opGoverns==='M-'?'M⁻':'V'}
+                              </td>
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10.5px',color:'#6b7280',background:'#fbf8ff'}}>
+                                N{v.opNode} · {v.opPos.toFixed(1)} ft
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{padding:'8px 14px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
+                    fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    LL demands scaled proportionally to vehicle GVW — run separate MIDAS analyses with each vehicle for exact results.
+                    Inventory γ_LL={gamLL} · Operating γ_LL={gamLL_op.toFixed(2)}
+                  </div>
+                </div>
+              )}
+            </div>)}
+
+            {/* ════ SUB-TAB: DEMAND VS. CAPACITY ════ */}
+            {ratingSubTab==='dc'&&(<div>
+              {(()=>{
+                const [dcMode,  setDcMode]  = useState('moment');
+                const [showInv, setShowInv] = useState(true);
+                const [showOp,  setShowOp]  = useState(true);
+
+                // Build factored demand and capacity arrays for Chart.js
+                const pts = [...ratingData].sort((a,b)=>a.pos-b.pos);
+                const labels = pts.map(p=>p.pos.toFixed(1)+' ft');
+
+                const capPosPts  = pts.map(p=>+p.CmnPos.toFixed(1));
+                const capNegPts  = pts.map(p=>-p.CmnNeg);
+                const capVPts    = pts.map(p=>+p.Cvn.toFixed(1));
+                const capVNegPts = pts.map(p=>-p.Cvn);
+
+                // Factored demand = γ_DC*DC + γ_DW*DW + γ_LL*LL (inventory)
+                const demMposInv = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllpos*ratingLLScale).toFixed(1));
+                const demMnegInv = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllneg*ratingLLScale).toFixed(1));
+                const demVInv    = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL*p.Vll*ratingLLScale).toFixed(1));
+                const demVNegInv = pts.map(p=>-(gamDC*p.Vdc+gamDW*p.Vdw+gamLL*p.Vll*ratingLLScale).toFixed(1));
+                // Operating
+                const demMposOp = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllpos*ratingLLScale).toFixed(1));
+                const demMnegOp = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllneg*ratingLLScale).toFixed(1));
+                const demVOp    = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL_op*p.Vll*ratingLLScale).toFixed(1));
+
+                const isMoment = dcMode==='moment';
+                const capId = `dc_${dcMode}_chart`;
+
+                const canvasRef2 = useRef(null);
+                const chartRef2  = useRef(null);
+                useEffect(()=>{
+                  if (!canvasRef2.current || !pts.length) return;
+                  if (chartRef2.current) chartRef2.current.destroy();
+                  const datasets = isMoment ? [
+                    {label:'φMn⁺ Capacity',      data:capPosPts,  borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+                    {label:'-φMn⁻ Capacity',     data:capNegPts,  borderColor:'#7c3aed',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+                    ...(showInv?[
+                      {label:'Demand M⁺ (Inv)',  data:demMposInv, borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
+                      {label:'Demand M⁻ (Inv)',  data:demMnegInv, borderColor:'#3b82f6',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
+                    ]:[]),
+                    ...(showOp?[
+                      {label:'Demand M⁺ (Op)',   data:demMposOp,  borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
+                      {label:'Demand M⁻ (Op)',   data:demMnegOp,  borderColor:'#f87171',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
+                    ]:[]),
+                    {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
+                  ] : [
+                    {label:'φVn Capacity',        data:capVPts,    borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+                    {label:'-φVn Capacity',       data:capVNegPts, borderColor:'#059669',borderWidth:2.5,borderDash:[4,2],pointRadius:0,fill:false,tension:0},
+                    ...(showInv?[{label:'Demand V (Inv)', data:demVInv, borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0}]:[]),
+                    ...(showOp? [{label:'Demand V (Op)',  data:demVOp,  borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0}]:[]),
+                    {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
+                  ];
+                  chartRef2.current = new Chart(canvasRef2.current, {
+                    type:'line', data:{labels, datasets},
+                    options:{
+                      responsive:true, maintainAspectRatio:false,
+                      interaction:{mode:'index',intersect:false},
+                      plugins:{
+                        legend:{display:true,labels:{font:{family:'IBM Plex Mono',size:10},boxWidth:14,filter:i=>!i.text.startsWith('_')}},
+                        tooltip:{callbacks:{
+                          title:items=>{const p=pts[items[0]?.dataIndex];return p?`Node ${p.node} · ${p.pos.toFixed(2)} ft`:'';}  ,
+                          label:ctx=>ctx.dataset.label.startsWith('_')?null:`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)} ${isMoment?'ft·k':'kips'}`,
+                        }},
+                      },
+                      scales:{
+                        x:{ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
+                        y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'},
+                          title:{display:true,text:isMoment?'Moment (ft·kips)':'Shear (kips)',font:{family:'IBM Plex Mono',size:9},color:'#9ca3af'}},
+                      }
+                    }
+                  });
+                  return ()=>{if(chartRef2.current)chartRef2.current.destroy();};
+                },[dcMode,showInv,showOp,ratingData]);
+
+                return (<div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
+                    <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Demand vs. Capacity</span>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                      Solid = φR_n capacity · Dashed = γ·(DC+DW+LL) factored demand
+                    </span>
+                    {/* Mode toggle */}
+                    <div style={{display:'flex',gap:'4px',marginLeft:'auto'}}>
+                      {[{id:'moment',label:'Moment'},  {id:'shear',label:'Shear'}].map(m=>(
+                        <button key={m.id} onClick={()=>setDcMode(m.id)}
+                          style={{padding:'4px 12px',borderRadius:'5px',border:'none',cursor:'pointer',fontSize:'12px',
+                            background:dcMode===m.id?'#1d4ed8':'#f3f4f6',
+                            color:dcMode===m.id?'#fff':'#6b7280',fontWeight:dcMode===m.id?'600':'400'}}>
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Level toggles */}
+                    <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#1d4ed8',cursor:'pointer'}}>
+                      <input type="checkbox" checked={showInv} onChange={e=>setShowInv(e.target.checked)} style={{accentColor:'#1d4ed8'}}/>
+                      Inventory (γ_LL={gamLL})
+                    </label>
+                    <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#dc2626',cursor:'pointer'}}>
+                      <input type="checkbox" checked={showOp} onChange={e=>setShowOp(e.target.checked)} style={{accentColor:'#dc2626'}}/>
+                      Operating (γ_LL={gamLL_op.toFixed(2)})
+                    </label>
+                    <button onClick={()=>dlPNG(capId,'DC_'+dcMode)}
+                      style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>
+                      ↓ PNG
+                    </button>
+                  </div>
+                  <div data-chartid={capId} style={{height:'320px'}}>
+                    <canvas ref={canvasRef2} style={{width:'100%',height:'100%'}}/>
+                  </div>
+                  <div style={{marginTop:'8px',fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textAlign:'right'}}>
+                    Green = φMn / φVn capacity · Blue dashed = Inventory demand · Red dashed = Operating demand
+                  </div>
+                </div>);
+              })()}
+            </div>)}
+
+            {/* ════ SUB-TAB: RATING REPORT CARD ════ */}
+            {ratingSubTab==='card'&&(<div>
+              {(()=>{
+                const now = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+                const govInv = govRating;
+                const govOp  = govOperating;
+                const cardStyle = {background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',
+                  padding:'32px 40px',maxWidth:'720px',margin:'0 auto',fontFamily:"'IBM Plex Sans',sans-serif"};
+                const lineStyle = {display:'flex',justifyContent:'space-between',alignItems:'flex-end',
+                  borderBottom:'1px solid #e5e7eb',paddingBottom:'5px',marginBottom:'10px'};
+                const fieldL = {fontSize:'11px',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.07em'};
+                const fieldV = {fontSize:'13px',fontWeight:'600',color:'#111827',fontFamily:'monospace'};
+                const rfColor = rf=>rf>=1?'#059669':rf>=0.3?'#d97706':'#dc2626';
+
+                return (
+                  <div>
+                    {/* Print button */}
+                    <div style={{display:'flex',justifyContent:'flex-end',marginBottom:'12px',gap:'8px'}}>
+                      <button onClick={()=>{
+                        const el=document.getElementById('rating-report-card');
+                        const w=window.open('','_blank');
+                        w.document.write(`<html><head><title>Rating Report Card</title>
+                          <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+                          <style>*{box-sizing:border-box}body{font-family:'IBM Plex Sans',sans-serif;padding:20px;max-width:780px;margin:0 auto}
+                          @media print{body{padding:0}button{display:none}}</style></head><body>
+                          ${el.innerHTML}
+                          <button onclick="window.print()" style="margin-top:16px;background:#1d4ed8;color:#fff;border:none;padding:10px 24px;border-radius:6px;cursor:pointer;font-size:14px">🖨 Print</button>
+                          </body></html>`);
+                        w.document.close();
+                      }} style={{background:'#1d4ed8',border:'none',borderRadius:'6px',color:'#fff',
+                        padding:'7px 18px',cursor:'pointer',fontSize:'12.5px',fontWeight:'600'}}>
+                        🖨 Print / Export
+                      </button>
+                    </div>
+
+                    <div id="rating-report-card" style={cardStyle}>
+                      {/* Header */}
+                      <div style={{textAlign:'center',marginBottom:'24px',paddingBottom:'18px',borderBottom:'3px solid #1d4ed8'}}>
+                        <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:'4px'}}>
+                          BRIDGE LOAD RATING — SUMMARY
+                        </div>
+                        <div style={{fontSize:'20px',fontWeight:'700',color:'#111827',marginBottom:'4px'}}>
+                          {cfg?.projectName||'Unnamed Bridge'}
+                        </div>
+                        <div style={{fontSize:'13px',color:'#6b7280'}}>
+                          {cfg?.projectBridgeId||''}{cfg?.projectBridgeId&&cfg?.projectClient?' · ':''}{cfg?.projectClient||''}
+                        </div>
+                      </div>
+
+                      {/* Project info grid */}
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'0',marginBottom:'20px'}}>
+                        {[
+                          ['Engineer',     cfg?.projectUser||'—'],
+                          ['Date',         now],
+                          ['Revision',     cfg?.projectRevision||'0'],
+                          ['Bridge ID',    cfg?.projectBridgeId||'—'],
+                          ['Method',       `${ratingMethod} · ${ratingLimitState}`],
+                          ['Category',     `${ratingCategory} · ${ratingLevel}`],
+                          ['Dead Load DC', ratingDcLC||'—'],
+                          ['Dead Load DW', ratingDwLC||'(none)'],
+                          ['Live Load',    ratingLLposLC||'—'],
+                        ].map(([l,v])=>(
+                          <div key={l} style={{padding:'7px 10px',border:'1px solid #f3f4f6',background:'#fafafa'}}>
+                            <div style={fieldL}>{l}</div>
+                            <div style={{...fieldV,fontSize:'12px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Rating factors summary */}
+                      <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'8px'}}>
+                        Load Factors & Modifiers
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'8px',marginBottom:'20px'}}>
+                        {[['γ_DC',gamDC],['γ_DW',gamDW],['γ_LL (Inv)',gamLL],['γ_LL (Op)',gamLL_op.toFixed(2)],['LL Scale',ratingLLScale.toFixed(4)],
+                          ['φ_c',phiC],['φ_s',phiS],['φ_f',ratingPhiF],['φ_v',ratingPhiV],['η',ratingEta]
+                        ].map(([l,v])=>(
+                          <div key={l} style={{background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'5px',padding:'6px 8px',textAlign:'center'}}>
+                            <div style={{fontSize:'9.5px',color:'#6b7280',fontFamily:'monospace',textTransform:'uppercase'}}>{l}</div>
+                            <div style={{fontSize:'14px',fontWeight:'700',fontFamily:'monospace',color:'#111827'}}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* THE RATING BOX */}
+                      <div style={{border:'2px solid #e5e7eb',borderRadius:'8px',overflow:'hidden',marginBottom:'20px'}}>
+                        {/* Column headers */}
+                        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr 1fr',background:'#1d4ed8',color:'#fff',
+                          padding:'8px 12px',fontSize:'10.5px',fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.06em',gap:'0',textAlign:'center'}}>
+                          <div style={{textAlign:'left'}}>Rating Level</div>
+                          <div>RF</div>
+                          <div>Rating<br/>Tons</div>
+                          <div>RF M⁺</div>
+                          <div>RF M⁻</div>
+                          <div>Controls</div>
+                        </div>
+                        {[
+                          {label:'Inventory', rf:govInv?.rfGov, tons:govInv?+(govInv.rfGov*ratingVehicleTon).toFixed(1):null,
+                           rfMpos:govInv?.rfMpos, rfMneg:govInv?.rfMneg, governs:govInv?.governs},
+                          {label:'Operating', rf:govOp?.rfGov,  tons:govOp?+(govOp.rfGov*ratingVehicleTon).toFixed(1):null,
+                           rfMpos:govOp?.rfMpos,  rfMneg:govOp?.rfMneg,  governs:govOp?.governs},
+                        ].map((row,ri)=>(
+                          <div key={row.label} style={{display:'grid',gridTemplateColumns:'2fr 1fr 1fr 1fr 1fr 1fr',
+                            padding:'12px 12px',textAlign:'center',gap:'0',
+                            background:ri===0?'#fff':'#fafafa',borderTop:'1px solid #e5e7eb'}}>
+                            <div style={{textAlign:'left',fontWeight:'600',fontSize:'13px',color:'#374151'}}>{row.label}</div>
+                            <div style={{fontSize:'20px',fontWeight:'800',fontFamily:'monospace',color:row.rf!=null?rfColor(row.rf):'#9ca3af'}}>
+                              {row.rf!=null?row.rf.toFixed(3):'—'}
+                            </div>
+                            <div style={{fontSize:'16px',fontWeight:'700',fontFamily:'monospace',color:row.rf!=null?rfColor(row.rf):'#9ca3af'}}>
+                              {row.tons!=null?row.tons+' T':'—'}
+                            </div>
+                            <div style={{fontSize:'13px',fontFamily:'monospace',color:'#374151'}}>{row.rfMpos?.toFixed(3)??'—'}</div>
+                            <div style={{fontSize:'13px',fontFamily:'monospace',color:'#374151'}}>{row.rfMneg?.toFixed(3)??'—'}</div>
+                            <div style={{fontSize:'12px',color:'#6b7280'}}>
+                              {row.governs==='M+'?'M⁺ Flexure':row.governs==='M-'?'M⁻ Flexure':'Shear'}
+                            </div>
+                          </div>
+                        ))}
+                        {/* Status bar */}
+                        <div style={{background:govInv?.rfGov>=1?'#d1fae5':'#fee2e2',padding:'8px 14px',
+                          display:'flex',alignItems:'center',gap:'10px',borderTop:'1px solid #e5e7eb'}}>
+                          <span style={{fontSize:'16px'}}>{govInv?.rfGov>=1?'✅':'❌'}</span>
+                          <span style={{fontSize:'13px',fontWeight:'700',color:govInv?.rfGov>=1?'#065f46':'#991b1b'}}>
+                            {govInv?.rfGov>=1 ? 'ADEQUATE — No Posting Required' : 'POSTING REQUIRED — See Below'}
+                          </span>
+                          <span style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',marginLeft:'auto'}}>
+                            Gov. node: N{govInv?.node} · {govInv?.pos?.toFixed(2)} ft
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Vehicle being rated */}
+                      <div style={{display:'flex',gap:'10px',alignItems:'center',marginBottom:'20px',
+                        padding:'8px 14px',background:'#f8fafc',border:'1px solid #e5e7eb',borderRadius:'6px'}}>
+                        <span style={{fontSize:'11px',color:'#6b7280'}}>Rated Vehicle:</span>
+                        <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>{ratingVehicleName}</span>
+                        <span style={{fontSize:'12px',fontFamily:'monospace',color:'#6b7280'}}>{ratingVehicleTon} T GVW</span>
+                        <span style={{fontSize:'10.5px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
+                          {ratingMethod} · MBE Table 6A.4.2.2-1
+                        </span>
+                      </div>
+
+                      {/* Signature block */}
+                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'24px',marginTop:'24px',paddingTop:'16px',borderTop:'1px solid #e5e7eb'}}>
+                        {['Prepared By','Checked By','Date'].map((lbl,i)=>(
+                          <div key={lbl}>
+                            <div style={{borderBottom:'1px solid #374151',height:'36px',marginBottom:'4px'}}/>
+                            <div style={{fontSize:'10px',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.06em'}}>{lbl}</div>
+                            {i===2&&<div style={{fontSize:'11px',fontFamily:'monospace',color:'#9ca3af',marginTop:'2px'}}>{now}</div>}
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Footer */}
+                      <div style={{marginTop:'16px',paddingTop:'10px',borderTop:'1px solid #f3f4f6',
+                        fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',textAlign:'center'}}>
+                        Generated by MCT Rating Tool · {ratingMethod} per AASHTO MBE {ratingLimitState} · {cfg?.projectName||''} · {now}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>)}
+
+          </>);
+        })()}
+      </div>)}
       {/* ── TAB: COMBOS ────────────────────────────────────────────────────── */}
       {viewTab==='combos'&&(<div>
         <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'14px',flexWrap:'wrap'}}>
