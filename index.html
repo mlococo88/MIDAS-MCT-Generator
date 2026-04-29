@@ -4000,36 +4000,112 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
 
           {/* ── Top Locations Table ── */}
           <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
-            <div style={{padding:'10px 14px',background:'#f9fafb',borderBottom:'1px solid #e5e7eb',fontSize:'11.5px',fontWeight:'600',color:'#374151'}}>
-              Critical Locations — Bottom 10 by RF (Governing)
+            <div style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 14px',background:'#f9fafb',borderBottom:'1px solid #e5e7eb'}}>
+              <span style={{fontSize:'11.5px',fontWeight:'600',color:'#374151'}}>Critical Locations — Bottom 10 by RF (Governing)</span>
+              <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
+                Moment ft·k · Shear kips · γ_DC={gamDC} · γ_DW={gamDW} · γ_LL={gamLL}
+              </span>
+              <button onClick={()=>{
+                const h=['Node','Pos (ft)',
+                  'M_DC (ft·k)','M_DW (ft·k)','M_LL+ (ft·k)','M_LL- (ft·k)',
+                  'V_DC (k)','V_DW (k)','V_LL (k)',
+                  'φMn+','φMn-','φVn',
+                  'RF M+','RF M-','RF Shear','RF Gov','Tons','Controls'];
+                const d=[...ratingData].sort((a,b)=>a.rfGov-b.rfGov).slice(0,10).map(p=>[
+                  p.node, p.pos.toFixed(2),
+                  p.Mdc.toFixed(2), p.Mdw.toFixed(2), p.Mllpos.toFixed(2), p.Mllneg.toFixed(2),
+                  p.Vdc.toFixed(2), p.Vdw.toFixed(2), p.Vll.toFixed(2),
+                  p.CmnPos, p.CmnNeg, p.Cvn,
+                  p.rfMpos?.toFixed(3)??'—', p.rfMneg?.toFixed(3)??'—', p.rfV?.toFixed(3)??'—',
+                  p.rfGov.toFixed(3), p.rfTons.toFixed(1), p.governs,
+                ]);
+                const csv=[h,...d].map(r=>r.join(',')).join('\n');
+                const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='critical_locations.csv';a.click();
+              }} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
             </div>
             <div style={{overflowX:'auto'}}>
-              <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11.5px',fontFamily:'monospace'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                 <thead>
+                  {/* Group header row */}
                   <tr style={{background:'#f9fafb'}}>
-                    {['Node','Pos (ft)','φMn⁺','φMn⁻','φVn','RF M⁺','RF M⁻','RF Shear','RF Gov','Tons','Controls','Status'].map(h=>(
-                      <th key={h} style={{padding:'7px 10px',textAlign:'left',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
+                    <th colSpan="2" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}/>
+                    <th colSpan="4" style={{padding:'5px 8px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',background:'#f0f9ff',borderBottom:'1px solid #bfdbfe',borderRight:'1px solid #e5e7eb'}}>
+                      Dead Load Moment (ft·k)
+                    </th>
+                    <th colSpan="3" style={{padding:'5px 8px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',background:'#fff7ed',borderBottom:'1px solid #fed7aa',borderRight:'1px solid #e5e7eb'}}>
+                      Dead Load Shear (k)
+                    </th>
+                    <th colSpan="3" style={{padding:'5px 8px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',background:'#f0fdf4',borderBottom:'1px solid #bbf7d0',borderRight:'1px solid #e5e7eb'}}>
+                      Capacity (φR_n)
+                    </th>
+                    <th colSpan="4" style={{padding:'5px 8px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',background:'#fdf4ff',borderBottom:'1px solid #e9d5ff',borderRight:'1px solid #e5e7eb'}}>
+                      Rating Factor
+                    </th>
+                    <th colSpan="3" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb'}}/>
+                  </tr>
+                  {/* Column header row */}
+                  <tr style={{background:'#f9fafb'}}>
+                    {[
+                      {h:'Node',    bg:'#fff',  br:false},
+                      {h:'Pos (ft)',bg:'#fff',  br:true},
+                      {h:'M_DC',    bg:'#f0f9ff',br:false},
+                      {h:'M_DW',    bg:'#f0f9ff',br:false},
+                      {h:'M_LL⁺',   bg:'#f0f9ff',br:false},
+                      {h:'M_LL⁻',   bg:'#f0f9ff',br:true},
+                      {h:'V_DC',    bg:'#fff7ed',br:false},
+                      {h:'V_DW',    bg:'#fff7ed',br:false},
+                      {h:'V_LL',    bg:'#fff7ed',br:true},
+                      {h:'φMn⁺',    bg:'#f0fdf4',br:false},
+                      {h:'φMn⁻',    bg:'#f0fdf4',br:false},
+                      {h:'φVn',     bg:'#f0fdf4',br:true},
+                      {h:'RF M⁺',   bg:'#fdf4ff',br:false},
+                      {h:'RF M⁻',   bg:'#fdf4ff',br:false},
+                      {h:'RF V',    bg:'#fdf4ff',br:false},
+                      {h:'RF Gov',  bg:'#fdf4ff',br:true},
+                      {h:'Tons',    bg:'#fff',  br:false},
+                      {h:'Controls',bg:'#fff',  br:false},
+                      {h:'Status',  bg:'#fff',  br:false},
+                    ].map(({h,bg,br})=>(
+                      <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',
+                        color:'#6b7280',fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',
+                        whiteSpace:'nowrap',background:bg,
+                        borderRight:br?'1px solid #e5e7eb':'none'}}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {[...ratingData].sort((a,b)=>a.rfGov-b.rfGov).slice(0,10).map(p=>{
                     const col=p.rfGov>=1?'#059669':p.rfGov>=0.3?'#d97706':'#dc2626';
-                    const bg=p.rfGov>=1?'#f0fdf4':p.rfGov>=0.3?'#fffbeb':'#fef2f2';
+                    const bg =p.rfGov>=1?'#f0fdf4':p.rfGov>=0.3?'#fffbeb':'#fef2f2';
+                    const rfCol = v=>v!==null?(v<1?'#dc2626':'#059669'):'#d1d5db';
                     return <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
-                      <td style={{padding:'6px 10px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
-                      <td style={{padding:'6px 10px'}}>{p.pos.toFixed(2)}</td>
-                      <td style={{padding:'6px 10px',color:'#1d4ed8',fontFamily:'monospace'}}>{p.CmnPos}</td>
-                      <td style={{padding:'6px 10px',color:'#7c3aed',fontFamily:'monospace'}}>{p.CmnNeg}</td>
-                      <td style={{padding:'6px 10px',color:'#dc2626',fontFamily:'monospace'}}>{p.Cvn}</td>
-                      <td style={{padding:'6px 10px',color:p.rfMpos!==null?(p.rfMpos<1?'#dc2626':'#059669'):'#d1d5db'}}>{p.rfMpos?.toFixed(3)??'—'}</td>
-                      <td style={{padding:'6px 10px',color:p.rfMneg!==null?(p.rfMneg<1?'#dc2626':'#059669'):'#d1d5db'}}>{p.rfMneg?.toFixed(3)??'—'}</td>
-                      <td style={{padding:'6px 10px',color:p.rfV!==null?(p.rfV<1?'#dc2626':'#059669'):'#d1d5db'}}>{p.rfV?.toFixed(3)??'—'}</td>
-                      <td style={{padding:'6px 10px',fontWeight:'700',color:col}}>{p.rfGov.toFixed(3)}</td>
-                      <td style={{padding:'6px 10px',fontWeight:'600',color:col}}>{p.rfTons.toFixed(1)}</td>
-                      <td style={{padding:'6px 10px',color:'#374151'}}>{p.governs==='M+'?'M⁺':p.governs==='M-'?'M⁻':'V'}</td>
-                      <td style={{padding:'6px 10px'}}>
-                        <span style={{fontSize:'10px',fontWeight:'600',color:col,background:'#fff',padding:'2px 7px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                      {/* Identity */}
+                      <td style={{padding:'6px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
+                      <td style={{padding:'6px 8px',borderRight:'1px solid #e5e7eb'}}>{p.pos.toFixed(2)}</td>
+                      {/* Dead load moments */}
+                      <td style={{padding:'6px 8px',background:'#f8fcff',color:'#374151'}}>{p.Mdc.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',background:'#f8fcff',color:'#374151'}}>{p.Mdw.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',background:'#f8fcff',color:'#059669',fontWeight:'500'}}>{p.Mllpos.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',background:'#f8fcff',color:'#7c3aed',fontWeight:'500',borderRight:'1px solid #e5e7eb'}}>{p.Mllneg>0.01?p.Mllneg.toFixed(1):'—'}</td>
+                      {/* Dead load shears */}
+                      <td style={{padding:'6px 8px',background:'#fffaf5',color:'#374151'}}>{p.Vdc.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',background:'#fffaf5',color:'#374151'}}>{p.Vdw.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',background:'#fffaf5',color:'#059669',fontWeight:'500',borderRight:'1px solid #e5e7eb'}}>{p.Vll.toFixed(1)}</td>
+                      {/* Capacity */}
+                      <td style={{padding:'6px 8px',color:'#1d4ed8',background:'#f8fff8'}}>{p.CmnPos}</td>
+                      <td style={{padding:'6px 8px',color:'#7c3aed',background:'#f8fff8'}}>{p.CmnNeg}</td>
+                      <td style={{padding:'6px 8px',color:'#dc2626',background:'#f8fff8',borderRight:'1px solid #e5e7eb'}}>{p.Cvn}</td>
+                      {/* RF */}
+                      <td style={{padding:'6px 8px',color:rfCol(p.rfMpos),background:'#fdf8ff'}}>{p.rfMpos?.toFixed(3)??'—'}</td>
+                      <td style={{padding:'6px 8px',color:rfCol(p.rfMneg),background:'#fdf8ff'}}>{p.rfMneg?.toFixed(3)??'—'}</td>
+                      <td style={{padding:'6px 8px',color:rfCol(p.rfV),background:'#fdf8ff'}}>{p.rfV?.toFixed(3)??'—'}</td>
+                      <td style={{padding:'6px 8px',fontWeight:'700',color:col,background:'#fdf8ff',borderRight:'1px solid #e5e7eb'}}>{p.rfGov.toFixed(3)}</td>
+                      {/* Summary */}
+                      <td style={{padding:'6px 8px',fontWeight:'600',color:col}}>{p.rfTons.toFixed(1)}</td>
+                      <td style={{padding:'6px 8px',color:'#374151'}}>{p.governs==='M+'?'M⁺':p.governs==='M-'?'M⁻':'V'}</td>
+                      <td style={{padding:'6px 8px'}}>
+                        <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
+                          padding:'2px 7px',borderRadius:'99px',border:`1px solid ${col}30`,whiteSpace:'nowrap'}}>
                           {p.rfGov>=1?'✓ OK':p.rfGov>=0.3?'⚠ Post':'❌ Critical'}
                         </span>
                       </td>
@@ -4037,6 +4113,15 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                   })}
                 </tbody>
               </table>
+            </div>
+            {/* Legend */}
+            <div style={{padding:'6px 14px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
+              fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',display:'flex',gap:'16px',flexWrap:'wrap'}}>
+              <span>M_DC = Dead Load DC moment</span>
+              <span>M_DW = Dead Load DW moment</span>
+              <span>M_LL = Live load envelope moment</span>
+              <span>V = Shear counterparts</span>
+              <span>All unfactored raw forces · φR_n = factored capacity</span>
             </div>
           </div>
         </div>)}
