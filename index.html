@@ -2189,7 +2189,9 @@ function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
 }
 
 // ── Demand vs. Capacity Overlay Chart ────────────────────────────────────────
-function DemandCapacityChart({ ratingData, nodePositions={}, mode='moment', yMax=null }) {
+function DemandCapacityChart({ ratingData, nodePositions={}, mode='moment',
+    showInv=true, showOp=true,
+    gamDC=1.25, gamDW=1.50, gamLL=1.75, gamLL_op=1.35, ratingLLScale=1 }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
   useEffect(()=>{
@@ -2198,93 +2200,64 @@ function DemandCapacityChart({ ratingData, nodePositions={}, mode='moment', yMax
 
     const pts = [...ratingData].sort((a,b)=>a.pos-b.pos);
     const labels = pts.map(p=>p.pos.toFixed(1)+' ft');
+    const isMoment = mode==='moment';
 
-    let datasets;
-    if (mode==='moment') {
-      // Capacity lines (stepped — based on zone)
-      const capPos = pts.map(p=>p.CmnPos);
-      const capNeg = pts.map(p=>-p.CmnNeg);
-      // Demand lines: factored DC + DW + LL (positive moment side)
-      const demPos = pts.map(p=>+(p.Mllpos>0.001 ? p.rfMpos!=null ? p.CmnPos/Math.max(p.rfMpos,0.001) * p.rfMpos : null : null));
-      // Actually compute demand directly
-      const demandPos = pts.map(p=>{
-        // Total factored demand at this node from ratingData
-        // RF = (C - demand_dc_dw) / (gamLL * Mll * scale)
-        // demand_total = C - RF*(gamLL*Mll*scale)  ... but we want to show raw demand
-        // Easier: demand = gamDC*Mdc + gamDW*Mdw + gamLL*Mllpos*scale
-        return p.Mllpos!=null ? null : null; // computed below
-      });
-      // Use stored raw values directly from ratingData
-      const factoredDemandPos = pts.map(p=>{
-        if (!isFinite(p.rfMpos)||p.rfMpos===null) return null;
-        // back-calculate: demand = C - RF*(gamLL*Mllpos*scale) = φMn - RF*(denominator)
-        // Simpler: just return φMn/RF as the demand capacity ratio numerator check
-        return +p.CmnPos.toFixed(1);
-      });
+    const capPosPts  = pts.map(p=>+p.CmnPos.toFixed(1));
+    const capNegPts  = pts.map(p=>-p.CmnNeg);
+    const capVPts    = pts.map(p=>+p.Cvn.toFixed(1));
+    const capVNegPts = pts.map(p=>-p.Cvn);
 
-      datasets = [
-        // Capacity
-        { label:'φMn⁺ Capacity',  data:capPos,
-          borderColor:'#059669', backgroundColor:'#05966912',
-          borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
-        { label:'-φMn⁻ Capacity', data:capNeg,
-          borderColor:'#7c3aed', backgroundColor:'#7c3aed12',
-          borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
-        // Demand: factored DC+DW+LL for positive moment
-        { label:'M⁺ Demand (γ·DC+DW+LL)', data:pts.map(p=>+((p.Mdc||0)+(p.Mdw||0)+(p.Mllpos||0)).toFixed(1)),
-          borderColor:'#1d4ed8', borderWidth:2, borderDash:[5,3],
-          pointRadius:0, fill:false, tension:0 },
-        // Demand for negative moment  
-        { label:'M⁻ Demand (γ·DC+DW+LL)', data:pts.map(p=>-(Math.abs(p.Mdc||0)+Math.abs(p.Mdw||0)+(p.Mllneg||0)).toFixed(1)),
-          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3],
-          pointRadius:0, fill:false, tension:0 },
-        // Zero line
-        { label:'_zero', data:pts.map(()=>0), borderColor:'#e5e7eb', borderWidth:1, pointRadius:0, fill:false },
-      ];
-    } else {
-      // Shear mode
-      datasets = [
-        { label:'φVn Capacity',    data:pts.map(p=>+p.Cvn.toFixed(1)),
-          borderColor:'#059669', borderWidth:2.5, pointRadius:0, fill:false, tension:0 },
-        { label:'-φVn Capacity',   data:pts.map(p=>-p.Cvn),
-          borderColor:'#059669', borderWidth:2.5, pointRadius:0, fill:false, tension:0, borderDash:[3,3] },
-        { label:'V Demand (γ·DC+DW+LL)', data:pts.map(p=>+((p.Vdc||0)+(p.Vdw||0)+(p.Vll||0)).toFixed(1)),
-          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3], pointRadius:0, fill:false, tension:0 },
-        { label:'-V Demand', data:pts.map(p=>-((p.Vdc||0)+(p.Vdw||0)+(p.Vll||0))),
-          borderColor:'#dc2626', borderWidth:2, borderDash:[5,3], pointRadius:0, fill:false, tension:0 },
-        { label:'_zero', data:pts.map(()=>0), borderColor:'#e5e7eb', borderWidth:1, pointRadius:0, fill:false },
-      ];
-    }
+    const demMposInv = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllpos*ratingLLScale).toFixed(1));
+    const demMnegInv = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllneg*ratingLLScale).toFixed(1));
+    const demVInv    = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL*p.Vll*ratingLLScale).toFixed(1));
+    const demMposOp  = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllpos*ratingLLScale).toFixed(1));
+    const demMnegOp  = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllneg*ratingLLScale).toFixed(1));
+    const demVOp     = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL_op*p.Vll*ratingLLScale).toFixed(1));
+
+    const datasets = isMoment ? [
+      {label:'φMn⁺ Capacity',    data:capPosPts, borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+      {label:'-φMn⁻ Capacity',   data:capNegPts, borderColor:'#7c3aed',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+      ...(showInv?[
+        {label:'Demand M⁺ (Inv)',data:demMposInv,borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
+        {label:'Demand M⁻ (Inv)',data:demMnegInv,borderColor:'#3b82f6',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
+      ]:[]),
+      ...(showOp?[
+        {label:'Demand M⁺ (Op)', data:demMposOp, borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
+        {label:'Demand M⁻ (Op)', data:demMnegOp, borderColor:'#f87171',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
+      ]:[]),
+      {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
+    ] : [
+      {label:'φVn Capacity',     data:capVPts,   borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
+      {label:'-φVn Capacity',    data:capVNegPts,borderColor:'#059669',borderWidth:2.5,borderDash:[4,2],pointRadius:0,fill:false,tension:0},
+      ...(showInv?[{label:'Demand V (Inv)',data:demVInv,borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0}]:[]),
+      ...(showOp? [{label:'Demand V (Op)', data:demVOp, borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0}]:[]),
+      {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
+    ];
 
     chartRef.current = new Chart(canvasRef.current, {
-      type:'line', data:{ labels, datasets },
+      type:'line', data:{labels, datasets},
       options:{
         responsive:true, maintainAspectRatio:false,
-        interaction:{ mode:'index', intersect:false },
+        interaction:{mode:'index',intersect:false},
         plugins:{
-          legend:{ display:true, labels:{ font:{family:'IBM Plex Mono',size:10}, boxWidth:14,
-            filter:i=>!i.text.startsWith('_') }},
-          tooltip:{ callbacks:{
-            title:items=>{
-              const p=pts[items[0]?.dataIndex];
-              return p ? `Node ${p.node} · ${p.pos.toFixed(2)} ft` : '';
-            },
-            label:ctx=>ctx.dataset.label.startsWith('_')?null:`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)}`,
+          legend:{display:true,labels:{font:{family:'IBM Plex Mono',size:10},boxWidth:14,filter:i=>!i.text.startsWith('_')}},
+          tooltip:{callbacks:{
+            title:items=>{const p=pts[items[0]?.dataIndex];return p?`Node ${p.node} · ${p.pos.toFixed(2)} ft`:'';}  ,
+            label:ctx=>ctx.dataset.label.startsWith('_')?null:`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)} ${isMoment?'ft·k':'kips'}`,
           }},
         },
         scales:{
-          x:{ ticks:{maxTicksLimit:18, font:{family:'IBM Plex Mono',size:9.5}, color:'#6b7280'}, grid:{color:'#f3f4f6'} },
-          y:{ ...(yMax!=null?{max:yMax,min:-yMax}:{}),
-              ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'}, grid:{color:'#f3f4f6'},
-              title:{display:true, text:mode==='moment'?'Moment (ft·kips)':'Shear (kips)',
-                font:{family:'IBM Plex Mono',size:9}, color:'#9ca3af'} },
+          x:{ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
+          y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'},
+            title:{display:true,text:isMoment?'Moment (ft·kips)':'Shear (kips)',font:{family:'IBM Plex Mono',size:9},color:'#9ca3af'}},
         }
       }
     });
     return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
-  },[ratingData, mode, yMax]);
+  },[ratingData, mode, showInv, showOp, gamDC, gamDW, gamLL, gamLL_op, ratingLLScale]);
   return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
 }
+
 function computeComboRows(origRows, combo) {
   if (!combo?.terms?.length || !origRows.length) return [];
   const validTerms = combo.terms.filter(t=>t.lc && t.factor!==0 && origRows.some(r=>r.load===t.lc));
@@ -2623,6 +2596,11 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   const [ratingVehicleTon,setRatingVehicleTon]= useState(36);
   const [ratingVehicleName,setRatingVehicleName]=useState('HL-93 Design Truck');
   const [rfYMax, setRfYMax] = useState(3); // null = auto
+  // Rating sub-tab and D/C chart state — must be at component level (Rules of Hooks)
+  const [ratingSubTab, setRatingSubTab] = useState('inputs');
+  const [dcMode,  setDcMode]  = useState('moment');
+  const [showInv, setShowInv] = useState(true);
+  const [showOp,  setShowOp]  = useState(true);
 
   // ── derived data ─────────────────────────────────────────────────────────
   const envelopeData = useMemo(()=>{
@@ -3227,7 +3205,6 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
       {viewTab==='rating'&&(<div>
         {/* ── Rating sub-tab bar ── */}
         {(()=>{
-          const [ratingSubTab, setRatingSubTab] = useState('inputs');
           const hasData = ratingData.length > 0;
           return (<>
             <div style={{display:'flex',gap:'2px',marginBottom:'14px',background:'#f3f4f6',borderRadius:'7px',padding:'3px'}}>
@@ -4070,118 +4047,51 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
 
             {/* ════ SUB-TAB: DEMAND VS. CAPACITY ════ */}
             {ratingSubTab==='dc'&&(<div>
-              {(()=>{
-                const [dcMode,  setDcMode]  = useState('moment');
-                const [showInv, setShowInv] = useState(true);
-                const [showOp,  setShowOp]  = useState(true);
-
-                // Build factored demand and capacity arrays for Chart.js
-                const pts = [...ratingData].sort((a,b)=>a.pos-b.pos);
-                const labels = pts.map(p=>p.pos.toFixed(1)+' ft');
-
-                const capPosPts  = pts.map(p=>+p.CmnPos.toFixed(1));
-                const capNegPts  = pts.map(p=>-p.CmnNeg);
-                const capVPts    = pts.map(p=>+p.Cvn.toFixed(1));
-                const capVNegPts = pts.map(p=>-p.Cvn);
-
-                // Factored demand = γ_DC*DC + γ_DW*DW + γ_LL*LL (inventory)
-                const demMposInv = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllpos*ratingLLScale).toFixed(1));
-                const demMnegInv = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL*p.Mllneg*ratingLLScale).toFixed(1));
-                const demVInv    = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL*p.Vll*ratingLLScale).toFixed(1));
-                const demVNegInv = pts.map(p=>-(gamDC*p.Vdc+gamDW*p.Vdw+gamLL*p.Vll*ratingLLScale).toFixed(1));
-                // Operating
-                const demMposOp = pts.map(p=>+(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllpos*ratingLLScale).toFixed(1));
-                const demMnegOp = pts.map(p=>-(gamDC*Math.abs(p.Mdc)+gamDW*Math.abs(p.Mdw)+gamLL_op*p.Mllneg*ratingLLScale).toFixed(1));
-                const demVOp    = pts.map(p=>+(gamDC*p.Vdc+gamDW*p.Vdw+gamLL_op*p.Vll*ratingLLScale).toFixed(1));
-
-                const isMoment = dcMode==='moment';
-                const capId = `dc_${dcMode}_chart`;
-
-                const canvasRef2 = useRef(null);
-                const chartRef2  = useRef(null);
-                useEffect(()=>{
-                  if (!canvasRef2.current || !pts.length) return;
-                  if (chartRef2.current) chartRef2.current.destroy();
-                  const datasets = isMoment ? [
-                    {label:'φMn⁺ Capacity',      data:capPosPts,  borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
-                    {label:'-φMn⁻ Capacity',     data:capNegPts,  borderColor:'#7c3aed',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
-                    ...(showInv?[
-                      {label:'Demand M⁺ (Inv)',  data:demMposInv, borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
-                      {label:'Demand M⁻ (Inv)',  data:demMnegInv, borderColor:'#3b82f6',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0},
-                    ]:[]),
-                    ...(showOp?[
-                      {label:'Demand M⁺ (Op)',   data:demMposOp,  borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
-                      {label:'Demand M⁻ (Op)',   data:demMnegOp,  borderColor:'#f87171',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0},
-                    ]:[]),
-                    {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
-                  ] : [
-                    {label:'φVn Capacity',        data:capVPts,    borderColor:'#059669',borderWidth:2.5,pointRadius:0,fill:false,tension:0},
-                    {label:'-φVn Capacity',       data:capVNegPts, borderColor:'#059669',borderWidth:2.5,borderDash:[4,2],pointRadius:0,fill:false,tension:0},
-                    ...(showInv?[{label:'Demand V (Inv)', data:demVInv, borderColor:'#1d4ed8',borderWidth:2,borderDash:[6,3],pointRadius:0,fill:false,tension:0}]:[]),
-                    ...(showOp? [{label:'Demand V (Op)',  data:demVOp,  borderColor:'#dc2626',borderWidth:1.5,borderDash:[3,3],pointRadius:0,fill:false,tension:0}]:[]),
-                    {label:'_zero',data:pts.map(()=>0),borderColor:'#e5e7eb',borderWidth:1,pointRadius:0,fill:false},
-                  ];
-                  chartRef2.current = new Chart(canvasRef2.current, {
-                    type:'line', data:{labels, datasets},
-                    options:{
-                      responsive:true, maintainAspectRatio:false,
-                      interaction:{mode:'index',intersect:false},
-                      plugins:{
-                        legend:{display:true,labels:{font:{family:'IBM Plex Mono',size:10},boxWidth:14,filter:i=>!i.text.startsWith('_')}},
-                        tooltip:{callbacks:{
-                          title:items=>{const p=pts[items[0]?.dataIndex];return p?`Node ${p.node} · ${p.pos.toFixed(2)} ft`:'';}  ,
-                          label:ctx=>ctx.dataset.label.startsWith('_')?null:`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(2)} ${isMoment?'ft·k':'kips'}`,
-                        }},
-                      },
-                      scales:{
-                        x:{ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
-                        y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'},
-                          title:{display:true,text:isMoment?'Moment (ft·kips)':'Shear (kips)',font:{family:'IBM Plex Mono',size:9},color:'#9ca3af'}},
-                      }
-                    }
-                  });
-                  return ()=>{if(chartRef2.current)chartRef2.current.destroy();};
-                },[dcMode,showInv,showOp,ratingData]);
-
-                return (<div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
-                    <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Demand vs. Capacity</span>
-                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
-                      Solid = φR_n capacity · Dashed = γ·(DC+DW+LL) factored demand
-                    </span>
-                    {/* Mode toggle */}
-                    <div style={{display:'flex',gap:'4px',marginLeft:'auto'}}>
-                      {[{id:'moment',label:'Moment'},  {id:'shear',label:'Shear'}].map(m=>(
-                        <button key={m.id} onClick={()=>setDcMode(m.id)}
-                          style={{padding:'4px 12px',borderRadius:'5px',border:'none',cursor:'pointer',fontSize:'12px',
-                            background:dcMode===m.id?'#1d4ed8':'#f3f4f6',
-                            color:dcMode===m.id?'#fff':'#6b7280',fontWeight:dcMode===m.id?'600':'400'}}>
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                    {/* Level toggles */}
-                    <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#1d4ed8',cursor:'pointer'}}>
-                      <input type="checkbox" checked={showInv} onChange={e=>setShowInv(e.target.checked)} style={{accentColor:'#1d4ed8'}}/>
-                      Inventory (γ_LL={gamLL})
-                    </label>
-                    <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#dc2626',cursor:'pointer'}}>
-                      <input type="checkbox" checked={showOp} onChange={e=>setShowOp(e.target.checked)} style={{accentColor:'#dc2626'}}/>
-                      Operating (γ_LL={gamLL_op.toFixed(2)})
-                    </label>
-                    <button onClick={()=>dlPNG(capId,'DC_'+dcMode)}
-                      style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>
-                      ↓ PNG
-                    </button>
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
+                  <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Demand vs. Capacity</span>
+                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    Solid = φR_n capacity · Dashed = γ·(DC+DW+LL) factored demand
+                  </span>
+                  <div style={{display:'flex',gap:'4px',marginLeft:'auto'}}>
+                    {[{id:'moment',label:'Moment'},{id:'shear',label:'Shear'}].map(m=>(
+                      <button key={m.id} onClick={()=>setDcMode(m.id)}
+                        style={{padding:'4px 12px',borderRadius:'5px',border:'none',cursor:'pointer',fontSize:'12px',
+                          background:dcMode===m.id?'#1d4ed8':'#f3f4f6',
+                          color:dcMode===m.id?'#fff':'#6b7280',fontWeight:dcMode===m.id?'600':'400'}}>
+                        {m.label}
+                      </button>
+                    ))}
                   </div>
-                  <div data-chartid={capId} style={{height:'320px'}}>
-                    <canvas ref={canvasRef2} style={{width:'100%',height:'100%'}}/>
-                  </div>
-                  <div style={{marginTop:'8px',fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textAlign:'right'}}>
-                    Green = φMn / φVn capacity · Blue dashed = Inventory demand · Red dashed = Operating demand
-                  </div>
-                </div>);
-              })()}
+                  <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#1d4ed8',cursor:'pointer'}}>
+                    <input type="checkbox" checked={showInv} onChange={e=>setShowInv(e.target.checked)} style={{accentColor:'#1d4ed8'}}/>
+                    Inventory (γ_LL={gamLL})
+                  </label>
+                  <label style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'11px',color:'#dc2626',cursor:'pointer'}}>
+                    <input type="checkbox" checked={showOp} onChange={e=>setShowOp(e.target.checked)} style={{accentColor:'#dc2626'}}/>
+                    Operating (γ_LL={gamLL_op.toFixed(2)})
+                  </label>
+                  <button onClick={()=>dlPNG(`dc_${dcMode}_chart`,'DC_'+dcMode)}
+                    style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>
+                    ↓ PNG
+                  </button>
+                </div>
+                <div data-chartid={`dc_${dcMode}_chart`} style={{height:'320px'}}>
+                  <DemandCapacityChart
+                    ratingData={ratingData}
+                    nodePositions={nodePositions}
+                    mode={dcMode}
+                    showInv={showInv}
+                    showOp={showOp}
+                    gamDC={gamDC} gamDW={gamDW}
+                    gamLL={gamLL} gamLL_op={gamLL_op}
+                    ratingLLScale={ratingLLScale}
+                  />
+                </div>
+                <div style={{marginTop:'8px',fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',textAlign:'right'}}>
+                  Green = φMn / φVn capacity · Blue dashed = Inventory demand · Red dashed = Operating demand
+                </div>
+              </div>
             </div>)}
 
             {/* ════ SUB-TAB: RATING REPORT CARD ════ */}
