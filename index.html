@@ -2549,8 +2549,9 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
   // ── Rating inputs — all persisted through cfg.rating ─────────────────────
   const R = cfg.rating || {};
   const setRating = (field, val) => {
-    if (typeof set !== 'function') return; // guard: set prop not provided
-    set(c=>({...c, rating:{...(c.rating||{}), [field]:val}}));
+    if (typeof set !== 'function') return; // guard
+    // App's set() is a (key, value) setter — spread existing rating fields + update one
+    set('rating', {...(cfg.rating||{}), [field]:val});
   };
 
   const ratingMethod     = R.method      ?? 'LRFR';
