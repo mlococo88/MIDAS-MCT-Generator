@@ -2382,7 +2382,7 @@ function vehicleGamLL(category, limitState, method, adtt) {
   return { inv: ls.Inventory?.LL ?? 1.75, op: ls.Operating?.LL ?? 1.35 };
 }
 
-function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, setMode,
+function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, mode, setMode,
     selectedLoadProp, setSelectedLoadProp, cfgSnap, setCfgSnap,
     resultsCombos, setResultsCombos,
     ratingCapZones, setRatingCapZones,
@@ -2548,7 +2548,10 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   // ── Rating state (MBE-compliant) ──────────────────────────────────────────
   // ── Rating inputs — all persisted through cfg.rating ─────────────────────
   const R = cfg.rating || {};
-  const setRating = (field, val) => set(c=>({...c, rating:{...(c.rating||{}), [field]:val}}));
+  const setRating = (field, val) => {
+    if (typeof set !== 'function') return; // guard: set prop not provided
+    set(c=>({...c, rating:{...(c.rating||{}), [field]:val}}));
+  };
 
   const ratingMethod     = R.method      ?? 'LRFR';
   const ratingLevel      = R.level       ?? 'Inventory';
@@ -6152,7 +6155,11 @@ function SavesModal({ cfg, onLoad, onClose,
 
   const doLoad = (entry) => {
     if (window.confirm(`Load "${entry.name}"? Unsaved changes to the current config will be lost.`)) {
-      onLoad({...DEFAULT_CFG, ...entry.cfg});
+      // Deep-merge rating so new fields always get defaults from DEFAULT_CFG
+      const merged = {...DEFAULT_CFG, ...entry.cfg,
+        rating: {...(DEFAULT_CFG.rating||{}), ...(entry.cfg?.rating||{})}
+      };
+      onLoad(merged);
       // Restore results if they were saved
       if (entry.resultsRows && setResultsRows)     setResultsRows(entry.resultsRows);
       if (entry.resultsCombos && setResultsCombos) setResultsCombos(entry.resultsCombos);
@@ -6338,7 +6345,9 @@ function App() {
       // Remap any legacy type:'DC' loads to 'DC1'
       if (!cfg.deadLoads) return cfg;
       const deadLoads = cfg.deadLoads.map(d=>d.type==='DC'?{...d,type:'DC1'}:d);
-      return {...cfg, deadLoads, loadCombos: buildDefaultCombos(deadLoads)};
+      // Deep-merge rating so new fields always get defaults
+      const rating = {...(DEFAULT_CFG.rating||{}), ...(cfg.rating||{})};
+      return {...cfg, deadLoads, rating, loadCombos: buildDefaultCombos(deadLoads)};
     };
     try{
       const s=localStorage.getItem('mct_cfg_v3');
@@ -6363,7 +6372,14 @@ function App() {
   const [ratingCapZones,    setRatingCapZones]      = useState(()=>{ try { const s=localStorage.getItem('mct_cap_zones_v1'); return s?JSON.parse(s):[]; } catch(e){ return []; }});
   const [reportState,       setReportState]         = useState(null);
   const set=(k,v)=>setCfg(p=>({...p,[k]:v}));
-  const loadCfg = newCfg => { setCfg({...DEFAULT_CFG,...newCfg}); setSavedMsg('Loaded!'); setTimeout(()=>setSavedMsg(''),2000); };
+  const loadCfg = newCfg => {
+    const merged = {...DEFAULT_CFG, ...newCfg,
+      rating: {...(DEFAULT_CFG.rating||{}), ...(newCfg?.rating||{})}
+    };
+    setCfg(merged);
+    setSavedMsg('Loaded!');
+    setTimeout(()=>setSavedMsg(''),2000);
+  };
 
   // Auto-sync dlc_* combos whenever dead loads change (name, type, add, remove)
   // Keeps AASHTO presets and custom combos intact — only replaces dlc_* entries
@@ -6509,7 +6525,7 @@ function App() {
     <StepSections cfg={cfg} set={set}/>,<StepLoads cfg={cfg} set={set}/>,
     <StepMovingLoads cfg={cfg} set={set}/>,<StepCombos cfg={cfg} set={set}/>,
     <StepGenerate mctOutput={mctOutput} downloadMCT={downloadMCT} cfg={cfg}/>,
-    <StepResults cfg={cfg}
+    <StepResults cfg={cfg} set={set}
       rows={resultsRows}         setRows={setResultsRows}
       rawText={resultsRawText}   setRawText={setResultsRawText}
       mode={resultsMode}         setMode={setResultsMode}
