@@ -2120,7 +2120,7 @@ function ChartCard({title, unit, color, isPrimary, load, chartId, children, onCs
   );
 }
 
-function RatingChart({ ratingData, nodePositions={} }) {
+function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
   useEffect(()=>{
@@ -2128,10 +2128,14 @@ function RatingChart({ ratingData, nodePositions={} }) {
     if (chartRef.current) chartRef.current.destroy();
     const labels = ratingData.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node].toFixed(1)+' ft':`N${p.node}`);
     const limit   = ratingData.map(()=>1.0);
-    const mpos    = ratingData.map(p=>p.rfMpos);
-    const mneg    = ratingData.map(p=>p.rfMneg);
-    const shear   = ratingData.map(p=>p.rfV);
-    const govern  = ratingData.map(p=>p.rfGov);
+    // Clip values to yMax so spikes don't appear at all — null means keep raw value
+    const clip = v => (v===null||v===undefined) ? null : (yMax!=null ? Math.min(v, yMax) : v);
+    const mpos    = ratingData.map(p=>clip(p.rfMpos));
+    const mneg    = ratingData.map(p=>clip(p.rfMneg));
+    const shear   = ratingData.map(p=>clip(p.rfV));
+    const govern  = ratingData.map(p=>clip(p.rfGov));
+    // Count values that were clipped (to show in tooltip)
+    const nClipped = yMax!=null ? ratingData.filter(p=>[p.rfMpos,p.rfMneg,p.rfV,p.rfGov].some(v=>v!=null&&v>yMax)).length : 0;
     chartRef.current = new Chart(canvasRef.current, {
       type:'line',
       data:{ labels, datasets:[
@@ -2148,19 +2152,39 @@ function RatingChart({ ratingData, nodePositions={} }) {
           legend:{ display:true, labels:{ font:{family:'IBM Plex Mono',size:10}, boxWidth:14,
             filter:item=>!item.text.startsWith('_') }},
           tooltip:{ callbacks:{
-            title:items=>{ const p=ratingData[items[0]?.dataIndex]; return p?`Node ${p.node} · ${p.pos.toFixed(2)} ft`:'';}  ,
-            label:ctx=>{ const v=ctx.parsed.y; return v!==null?`${ctx.dataset.label}: ${v?.toFixed(3)}`:null; },
+            title:items=>{
+              const p=ratingData[items[0]?.dataIndex];
+              if (!p) return '';
+              const raw = [p.rfMpos,p.rfMneg,p.rfV,p.rfGov];
+              const anyClipped = yMax!=null && raw.some(v=>v!=null&&v>yMax);
+              return `Node ${p.node} · ${p.pos.toFixed(2)} ft${anyClipped?' (values clipped to '+yMax+')':''}`;
+            },
+            label:ctx=>{
+              const v=ctx.parsed.y;
+              if (v===null) return null;
+              const p=ratingData[ctx.dataIndex];
+              // Show raw value if clipped
+              const rawMap={'RF M⁺':p?.rfMpos,'RF M⁻':p?.rfMneg,'RF Shear':p?.rfV,'RF Governing':p?.rfGov};
+              const raw=rawMap[ctx.dataset.label];
+              const isClipped=yMax!=null&&raw!=null&&raw>yMax;
+              return isClipped
+                ? `${ctx.dataset.label}: ${raw.toFixed(3)} (clipped to ${yMax})`
+                : `${ctx.dataset.label}: ${v?.toFixed(3)}`;
+            },
           }}
         },
         scales:{
           x:{ ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'}, grid:{color:'#f3f4f6'} },
-          y:{ min:0, ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'}, grid:{color:'#f3f4f6'},
-              title:{display:true,text:'Rating Factor RF',font:{family:'IBM Plex Mono',size:9},color:'#9ca3af'} },
+          y:{ min:0,
+              ...(yMax!=null ? {max:yMax} : {}),
+              ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},
+              grid:{color:'#f3f4f6'},
+              title:{display:true,text:`Rating Factor RF${yMax!=null?` (capped at ${yMax})`:''}`,font:{family:'IBM Plex Mono',size:9},color:'#9ca3af'} },
         }
       }
     });
     return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
-  },[ratingData]);
+  },[ratingData, yMax]);
   return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
 }
 
@@ -2502,6 +2526,7 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   };
   const [ratingVehicleTon,setRatingVehicleTon]= useState(36);
   const [ratingVehicleName,setRatingVehicleName]=useState('HL-93 Design Truck');
+  const [rfYMax, setRfYMax] = useState(3); // null = auto
 
   // ── derived data ─────────────────────────────────────────────────────────
   const envelopeData = useMemo(()=>{
@@ -3185,24 +3210,132 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
         <div style={{display:'flex',gap:'12px',flexWrap:'wrap',marginBottom:'12px'}}>
           {/* Load cases */}
           <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',flex:'1',minWidth:'260px'}}>
-            <div style={{fontSize:'11.5px',fontWeight:'600',color:'#374151',marginBottom:'12px'}}>Load Cases</div>
-            {[
-              {label:'Dead Load DC (structural)',hint:'Self-weight, diaphragms, haunch…',val:ratingDcLC,set:setRatingDcLC,color:'#374151'},
-              {label:'Dead Load DW (wearing surface)',hint:'Future overlay, utilities — use 0 if none',val:ratingDwLC,set:setRatingDwLC,color:'#6b7280',optional:true},
-              {label:'Live Load — max (pos. moment)',hint:'Moving load (max) case',val:ratingLLposLC,set:setRatingLLposLC,color:'#1d4ed8'},
-              {label:'Live Load — min (neg. moment)',hint:'Moving load (min) case — for continuous spans',val:ratingLLnegLC,set:setRatingLLnegLC,color:'#7c3aed',optional:true},
-            ].map(({label,hint,val,set:setter,color,optional})=>(
-              <div key={label} style={{marginBottom:'10px'}}>
-                <div style={{fontSize:'10px',fontFamily:'monospace',color,marginBottom:'3px',fontWeight:'500'}}>{label}{optional&&<span style={{color:'#d1d5db'}}> (optional)</span>}</div>
-                <select style={{...INP,fontSize:'12px'}} value={val} onChange={e=>setter(e.target.value)}>
-                  <option value="">{optional?'— none —':'— select —'}</option>
-                  {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
-                    <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
-                  ):null)}
-                </select>
-                <div style={{fontSize:'9.5px',color:'#9ca3af',fontFamily:'monospace',marginTop:'1px'}}>{hint}</div>
-              </div>
-            ))}
+            <div style={{fontSize:'11.5px',fontWeight:'600',color:'#374151',marginBottom:'4px'}}>Load Cases</div>
+            <div style={{fontSize:'10.5px',color:'#6b7280',fontFamily:'monospace',marginBottom:'12px'}}>
+              Select <em>unfactored</em> results — apply γ factors in the panel above
+            </div>
+
+            {/* ── Factoring status helper ── */}
+            {(()=>{
+              // Classify a load case name as raw or already-factored
+              const getLcInfo = (lcName) => {
+                if (!lcName) return null;
+                const combo = combos.find(c=>c.name===lcName);
+                if (combo) {
+                  const hasNonUnit = combo.terms?.some(t=>t.factor!==1 && t.factor!==0);
+                  const formula = (combo.terms||[]).filter(t=>t.lc)
+                    .map(t=>`${t.factor!==1?t.factor+'×':''}[${t.lc.replace(/_[^_]+$/,'').slice(0,20)}]`)
+                    .join(' + ');
+                  return { type:'combo', factored:hasNonUnit, formula, comboName:lcName };
+                }
+                const grp = Object.entries(groupedLCs).find(([,lcs])=>lcs.includes(lcName))?.[0];
+                if (grp==='Static') return { type:'static', factored:false };
+                if (grp?.startsWith('Moving')) return { type:'moving', factored:false };
+                if (grp==='Combinations') return { type:'combination', factored:true };
+                return { type:'unknown', factored:false };
+              };
+
+              const dcInfo  = getLcInfo(ratingDcLC);
+              const dwInfo  = getLcInfo(ratingDwLC);
+              const llInfo  = getLcInfo(ratingLLposLC);
+
+              // Double-factor warnings
+              const doubleDC = dcInfo?.factored && gamDC !== 1.0;
+              const doubleDW = dwInfo?.factored && gamDW !== 1.0;
+              const doubleLL = llInfo?.factored && gamLL !== 1.0;
+              const anyDouble = doubleDC || doubleDW || doubleLL;
+
+              const LcStatus = ({info, lcName, gam, gamLabel}) => {
+                if (!info || !lcName) return null;
+                if (info.type==='static') return (
+                  <div style={{display:'flex',alignItems:'center',gap:'5px',marginTop:'3px',fontSize:'10px',fontFamily:'monospace'}}>
+                    <span style={{color:'#059669',fontWeight:'600'}}>✓ Unfactored</span>
+                    <span style={{color:'#9ca3af'}}>— raw static result · apply {gamLabel} = {gam}</span>
+                  </div>
+                );
+                if (info.type==='moving') return (
+                  <div style={{display:'flex',alignItems:'center',gap:'5px',marginTop:'3px',fontSize:'10px',fontFamily:'monospace'}}>
+                    <span style={{color:'#059669',fontWeight:'600'}}>✓ Unfactored</span>
+                    <span style={{color:'#9ca3af'}}>— raw moving load envelope · apply {gamLabel} = {gam}</span>
+                  </div>
+                );
+                if (info.type==='combo') return (
+                  <div style={{marginTop:'4px',padding:'5px 8px',borderRadius:'4px',
+                    background:info.factored?'#fffbeb':'#f0fdf4',
+                    border:`1px solid ${info.factored?'#fde68a':'#bbf7d0'}`}}>
+                    <div style={{fontSize:'10px',fontFamily:'monospace',color:info.factored?'#92400e':'#166534',fontWeight:'600'}}>
+                      {info.factored ? '⚠ Pre-factored combination' : '✓ Unfactored combination (all ×1.0)'}
+                    </div>
+                    {info.formula&&<div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#6b7280',marginTop:'1px',
+                      overflowX:'auto',whiteSpace:'nowrap'}}>{info.formula}</div>}
+                    {info.factored&&<div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#b45309',marginTop:'2px'}}>
+                      → Set {gamLabel} = 1.0 to avoid double-factoring
+                    </div>}
+                  </div>
+                );
+                if (info.type==='combination') return (
+                  <div style={{marginTop:'4px',padding:'5px 8px',borderRadius:'4px',
+                    background:'#fffbeb',border:'1px solid #fde68a'}}>
+                    <div style={{fontSize:'10px',fontFamily:'monospace',color:'#92400e',fontWeight:'600'}}>
+                      ⚠ MCT load combination — likely pre-factored
+                    </div>
+                    <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#b45309',marginTop:'1px'}}>
+                      Verify factors in Step 6 and set {gamLabel} = 1.0 if already factored
+                    </div>
+                  </div>
+                );
+                return null;
+              };
+
+              return (<>
+                {/* Overall double-factor warning banner */}
+                {anyDouble&&(
+                  <div style={{marginBottom:'12px',padding:'9px 12px',background:'#fef2f2',
+                    border:'1px solid #fca5a5',borderRadius:'6px'}}>
+                    <div style={{fontSize:'12px',fontWeight:'700',color:'#dc2626',marginBottom:'4px'}}>
+                      ⚠ Possible Double-Factoring Detected
+                    </div>
+                    <div style={{fontSize:'10.5px',fontFamily:'monospace',color:'#b91c1c',lineHeight:'1.6'}}>
+                      {doubleDC&&<div>• DC load case appears pre-factored — and γ_DC = {gamDC} (≠ 1.0)</div>}
+                      {doubleDW&&<div>• DW load case appears pre-factored — and γ_DW = {gamDW} (≠ 1.0)</div>}
+                      {doubleLL&&<div>• LL load case appears pre-factored — and γ_LL = {gamLL} (≠ 1.0)</div>}
+                    </div>
+                    <div style={{fontSize:'10px',color:'#b91c1c',fontFamily:'monospace',marginTop:'5px',
+                      paddingTop:'5px',borderTop:'1px solid #fecaca'}}>
+                      RF = (C − <strong>γ_DC·DC</strong> − <strong>γ_DW·DW</strong>) / (<strong>γ_LL·LL</strong>·scale) — if DC/DW/LL are already factored results,
+                      set the corresponding γ = 1.0 above.
+                    </div>
+                  </div>
+                )}
+
+                {/* Per-selector rows */}
+                {[
+                  {label:'Dead Load DC (structural)',hint:'Selfweight + DC1 + DC2 dead loads (unfactored)',
+                   val:ratingDcLC, set:setRatingDcLC, info:dcInfo, gam:gamDC, gamLabel:'γ_DC', color:'#374151'},
+                  {label:'Dead Load DW (wearing surface)',hint:'Wearing surface / utilities (unfactored)',
+                   val:ratingDwLC, set:setRatingDwLC, info:dwInfo, gam:gamDW, gamLabel:'γ_DW', color:'#6b7280', optional:true},
+                  {label:'Live Load — max (pos. moment)',hint:'Moving load (max) envelope — unfactored',
+                   val:ratingLLposLC, set:setRatingLLposLC, info:llInfo, gam:gamLL, gamLabel:'γ_LL', color:'#1d4ed8'},
+                  {label:'Live Load — min (neg. moment)',hint:'Moving load (min) — for continuous spans',
+                   val:ratingLLnegLC, set:setRatingLLnegLC, info:getLcInfo(ratingLLnegLC), gam:gamLL, gamLabel:'γ_LL', color:'#7c3aed', optional:true},
+                ].map(({label,hint,val,set:setter,info,gam,gamLabel,color,optional})=>(
+                  <div key={label} style={{marginBottom:'12px'}}>
+                    <div style={{fontSize:'10px',fontFamily:'monospace',color,marginBottom:'3px',fontWeight:'500'}}>
+                      {label}{optional&&<span style={{color:'#d1d5db'}}> (optional)</span>}
+                    </div>
+                    <select style={{...INP,fontSize:'12px',
+                      borderColor:info?.factored?'#fca5a5':info?.type==='static'||info?.type==='moving'?'#bbf7d0':'#e5e7eb'}}
+                      value={val} onChange={e=>setter(e.target.value)}>
+                      <option value="">{optional?'— none —':'— select —'}</option>
+                      {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
+                        <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
+                      ):null)}
+                    </select>
+                    <LcStatus info={info} lcName={val} gam={gam} gamLabel={gamLabel}/>
+                  </div>
+                ))}
+              </>);
+            })()}
           </div>
 
           {/* Resistance factors */}
@@ -3458,7 +3591,7 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
 
           {/* ── RF Diagram ── */}
           <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px',flexWrap:'wrap'}}>
+            <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'8px',flexWrap:'wrap'}}>
               <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Rating Factor RF Along Beam</span>
               <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>{ratingMethod} · {ratingLimitState} · {ratingLevel} · γ_LL={gamLL} · LL×{ratingLLScale.toFixed(3)}</span>
               <div style={{marginLeft:'auto',display:'flex',gap:'8px',fontSize:'10px',fontFamily:'monospace'}}>
@@ -3474,8 +3607,48 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                 const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='rating_factors.csv';a.click();
               }} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
             </div>
+
+            {/* Y-axis cap control */}
+            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'10px',
+              padding:'6px 10px',background:'#f9fafb',borderRadius:'5px',border:'1px solid #e5e7eb',flexWrap:'wrap'}}>
+              <span style={{fontSize:'10.5px',color:'#6b7280',fontFamily:'monospace'}}>Y-axis cap:</span>
+              {[1.5, 2, 3, 5, null].map(v=>(
+                <button key={v??'auto'} onClick={()=>setRfYMax(v)}
+                  style={{padding:'3px 10px',borderRadius:'4px',border:`1px solid ${rfYMax===v?'#1d4ed8':'#e5e7eb'}`,
+                    background:rfYMax===v?'#eff6ff':'#fff',
+                    color:rfYMax===v?'#1d4ed8':'#6b7280',
+                    fontSize:'11px',fontFamily:'monospace',cursor:'pointer',fontWeight:rfYMax===v?'700':'400'}}>
+                  {v??'Auto'}
+                </button>
+              ))}
+              <div style={{display:'flex',alignItems:'center',gap:'4px',marginLeft:'4px'}}>
+                <span style={{fontSize:'10px',color:'#9ca3af',fontFamily:'monospace'}}>Custom:</span>
+                <input type="number" min="1" max="20" step="0.5"
+                  value={rfYMax??''} placeholder="auto"
+                  onChange={e=>{
+                    const v=parseFloat(e.target.value);
+                    setRfYMax(isNaN(v)||v<=0 ? null : v);
+                  }}
+                  style={{...INP2,width:'64px',textAlign:'right',fontFamily:'monospace',fontSize:'11px'}}/>
+              </div>
+              {rfYMax!=null&&(()=>{
+                const nClipped=ratingData.filter(p=>[p.rfMpos,p.rfMneg,p.rfV,p.rfGov].some(v=>v!=null&&v>rfYMax)).length;
+                return nClipped>0?(
+                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#d97706',
+                    background:'#fffbeb',padding:'2px 7px',borderRadius:'99px',border:'1px solid #fde68a'}}>
+                    {nClipped} value{nClipped!==1?'s':''} clipped — see tooltip for raw values
+                  </span>
+                ):null;
+              })()}
+              {rfYMax===null&&(
+                <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af',fontStyle:'italic'}}>
+                  showing full range
+                </span>
+              )}
+            </div>
+
             <div data-chartid="rating-chart" style={{height:'280px'}}>
-              <RatingChart ratingData={ratingData} nodePositions={nodePositions}/>
+              <RatingChart ratingData={ratingData} nodePositions={nodePositions} yMax={rfYMax}/>
             </div>
           </div>
 
