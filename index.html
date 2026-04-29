@@ -2601,8 +2601,25 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   const [dcMode,  setDcMode]  = useState('moment');
   const [showInv, setShowInv] = useState(true);
   const [showOp,  setShowOp]  = useState(true);
+  // Per-vehicle LC assignment for multi-vehicle rating { [vehicleName]: {posLC, negLC} }
+  const [vehicleLCMap, setVehicleLCMap] = useState({});
+  // Auto-populate vehicleLCMap when rows or selected vehicles change
+  useEffect(()=>{
+    if (!origRows.length || !(cfg?.selectedVehicles?.length)) return;
+    const loadedLCs = [...new Set(origRows.map(r=>r.load))];
+    setVehicleLCMap(prev=>{
+      const next = {...prev};
+      (cfg.selectedVehicles||[]).forEach(vn=>{
+        if (next[vn]?.posLC) return; // don't overwrite manual selections
+        const posLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(max)')||lc.includes('max')))
+                   || loadedLCs.find(lc=>lc.includes(vn));
+        const negLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(min)')||lc.includes('min')));
+        if (posLC) next[vn] = { posLC, negLC: negLC||'' };
+      });
+      return next;
+    });
+  }, [origRows.length, JSON.stringify(cfg?.selectedVehicles)]);
 
-  // ── derived data ─────────────────────────────────────────────────────────
   const envelopeData = useMemo(()=>{
     if (!envelopeLCs.length || !rows.length) return {};
     const out={};
@@ -2728,45 +2745,73 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
   const govOperating = operatingData.length ? operatingData.reduce((a,b)=>a.rfGov<b.rfGov?a:b,operatingData[0]) : null;
 
   // ── Multi-vehicle rating table ────────────────────────────────────────────
+  // ── Multi-vehicle rating — uses ACTUAL result rows per vehicle ────────────
   const multiVehicleData = useMemo(()=>{
-    if (!ratingData.length || !ratingVehicleTon || ratingVehicleTon<=0) return [];
-    const W_rated = ratingVehicleTon;
-    // Only vehicles that have a known tonnage
+    if (!capZones.length || !origRows.length) return [];
+
     const vehicles = (cfg?.selectedVehicles||[]).map(vn=>{
       const tons = VEHICLE_TONS[vn];
       const veh  = ALL_VEHICLES.find(v=>v.name===vn);
-      return { name:vn, label:veh?.label||vn, tons };
-    }).filter(v=>v.tons>0);
+      const lcAssign = vehicleLCMap[vn] || {};
+      return { name:vn, label:veh?.label||vn, tons:tons||0, ...lcAssign };
+    });
 
-    return vehicles.map(veh=>{
-      const ratio = veh.tons / W_rated;
-      // Scale LL demands proportionally to gross weight
-      const scaledNodes = ratingData.map(p=>{
-        const ps = { ...p,
-          Mllpos: p.Mllpos * ratio,
-          Mllneg: p.Mllneg * ratio,
-          Vll:    p.Vll    * ratio,
-        };
-        const inv = computeNodeRF(ps, gamDC, gamDW, gamLL,    ratingLLScale);
-        const op  = computeNodeRF(ps, gamDC, gamDW, gamLL_op, ratingLLScale);
-        return { node:p.node, pos:p.pos, inv, op };
-      });
+    // Only rate vehicles that have at least a max LC assigned
+    const ratable = vehicles.filter(v=>v.posLC);
 
-      const govInv = scaledNodes.reduce((a,b)=>a.inv.rfGov<b.inv.rfGov?a:b, scaledNodes[0]);
-      const govOp  = scaledNodes.reduce((a,b)=>a.op.rfGov<b.op.rfGov?a:b,  scaledNodes[0]);
+    const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
+      .filter(n=>nodePositions[n]!==undefined)
+      .sort((a,b)=>nodePositions[a]-nodePositions[b]);
+
+    return ratable.map(veh=>{
+      const nodeResults = nodeList.map(node=>{
+        const xPos = nodePositions[node]??0;
+        const dc  = ratingDcLC ? origRows.find(r=>r.load===ratingDcLC &&r.node===node) : null;
+        const dw  = ratingDwLC ? origRows.find(r=>r.load===ratingDwLC &&r.node===node) : null;
+        const llp = origRows.find(r=>r.load===veh.posLC&&r.node===node);
+        const lln = veh.negLC ? origRows.find(r=>r.load===veh.negLC&&r.node===node) : llp;
+        if (!llp) return null;
+
+        const Mdc = dc?.momentY||0, Mdw = dw?.momentY||0;
+        const Vdc = Math.abs(dc?.shearZ||0), Vdw = Math.abs(dw?.shearZ||0);
+        const Mllpos = Math.max(0, llp?.momentY||0);
+        const Mllneg = Math.abs(Math.min(0, lln?.momentY||0));
+        const Vll    = Math.max(Math.abs(llp?.shearZ||0), Math.abs(lln?.shearZ||0));
+
+        const cap = capAt(xPos);
+        const CmnPos = phiC * phiS * ratingPhiF * cap.MnPos;
+        const CmnNeg = phiC * phiS * ratingPhiF * cap.MnNeg;
+        const Cvn    = phiC * phiS * ratingPhiV * cap.Vn;
+
+        const p = { Mdc, Mdw, Vdc, Vdw, Mllpos, Mllneg, Vll, CmnPos, CmnNeg, Cvn };
+        const inv = computeNodeRF(p, gamDC, gamDW, gamLL,    ratingLLScale);
+        const op  = computeNodeRF(p, gamDC, gamDW, gamLL_op, ratingLLScale);
+        return { node, pos:xPos, inv, op, CmnPos:+CmnPos.toFixed(1), CmnNeg:+CmnNeg.toFixed(1), Cvn:+Cvn.toFixed(1) };
+      }).filter(Boolean);
+
+      if (!nodeResults.length) return null;
+
+      const govInv = nodeResults.reduce((a,b)=>a.inv.rfGov<b.inv.rfGov?a:b, nodeResults[0]);
+      const govOp  = nodeResults.reduce((a,b)=>a.op.rfGov<b.op.rfGov?a:b,  nodeResults[0]);
+      const tons = veh.tons || null;
+
       return {
-        name:veh.name, label:veh.label, tons:veh.tons,
-        invRF:  +govInv.inv.rfGov.toFixed(3),
-        invTons:+(govInv.inv.rfGov * veh.tons).toFixed(1),
+        name:veh.name, label:veh.label, tons,
+        posLC: veh.posLC, negLC: veh.negLC,
+        invRF:    +govInv.inv.rfGov.toFixed(3),
+        invTons:  tons ? +(govInv.inv.rfGov * tons).toFixed(1) : null,
         invGoverns: govInv.inv.governs,
         invNode: govInv.node, invPos: govInv.pos,
-        opRF:   +govOp.op.rfGov.toFixed(3),
-        opTons: +(govOp.op.rfGov  * veh.tons).toFixed(1),
+        opRF:     +govOp.op.rfGov.toFixed(3),
+        opTons:   tons ? +(govOp.op.rfGov * tons).toFixed(1) : null,
         opGoverns: govOp.op.governs,
         opNode: govOp.node, opPos: govOp.pos,
+        nodeCount: nodeResults.length,
       };
-    });
-  },[ratingData, cfg?.selectedVehicles, ratingVehicleTon, gamDC, gamDW, gamLL, gamLL_op, ratingLLScale]);
+    }).filter(Boolean);
+  },[origRows, vehicleLCMap, cfg?.selectedVehicles, ratingDcLC, ratingDwLC,
+     capZones, nodePositions, phiC, phiS, ratingPhiF, ratingPhiV,
+     gamDC, gamDW, gamLL, gamLL_op, ratingLLScale]);
 
   // Push rating state up so App can include it in the report
   useEffect(()=>{
@@ -3951,23 +3996,118 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
 
             {/* ════ SUB-TAB: MULTI-VEHICLE TABLE ════ */}
             {ratingSubTab==='table'&&(<div>
-              <div style={{fontSize:'12px',color:'#6b7280',fontFamily:'monospace',marginBottom:'14px',
-                padding:'8px 12px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'6px'}}>
-                RF computed by scaling LL demands proportionally to each vehicle's gross weight relative to the rated vehicle ({ratingVehicleName}, {ratingVehicleTon} T).
-                γ_DC={gamDC} · γ_DW={gamDW} · γ_LL(Inv)={gamLL} · γ_LL(Op)={gamLL_op.toFixed(2)} · LL scale ×{ratingLLScale.toFixed(4)}
+
+              {/* ── Per-vehicle LC assignment ── */}
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111827',marginBottom:'4px'}}>Vehicle → Result Case Mapping</div>
+                <div style={{fontSize:'11px',color:'#6b7280',fontFamily:'monospace',marginBottom:'12px'}}>
+                  Assign the MIDAS result LC for each vehicle. Auto-detected from loaded results — adjust if needed.
+                  DC and DW load cases come from the Inputs tab.
+                </div>
+                <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                  {/* Header */}
+                  <div style={{display:'grid',gridTemplateColumns:'180px 1fr 1fr 80px',gap:'8px',
+                    padding:'5px 8px',fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',
+                    textTransform:'uppercase',letterSpacing:'0.06em'}}>
+                    <span>Vehicle</span>
+                    <span>LL Max LC (positive moment)</span>
+                    <span>LL Min LC (negative moment, optional)</span>
+                    <span>GVW (T)</span>
+                  </div>
+                  {(cfg?.selectedVehicles||[]).map(vn=>{
+                    const veh = ALL_VEHICLES.find(v=>v.name===vn);
+                    const assign = vehicleLCMap[vn]||{};
+                    const loadedLCs = [...new Set(origRows.map(r=>r.load))];
+                    const movMax = loadedLCs.filter(lc=>lc.includes('(max)')||groupedLCs['Moving (max)']?.includes(lc));
+                    const movMin = loadedLCs.filter(lc=>lc.includes('(min)')||groupedLCs['Moving (min)']?.includes(lc));
+                    const allMoving = loadedLCs.filter(lc=>
+                      groupedLCs['Moving (max)']?.includes(lc)||
+                      groupedLCs['Moving (min)']?.includes(lc)||
+                      groupedLCs['Moving (all)']?.includes(lc));
+                    const hasPos = !!assign.posLC;
+                    const tons = VEHICLE_TONS[vn];
+                    return (
+                      <div key={vn} style={{display:'grid',gridTemplateColumns:'180px 1fr 1fr 80px',gap:'8px',
+                        alignItems:'center',padding:'8px',borderRadius:'6px',
+                        background:hasPos?'#fff':'#fffbeb',border:`1px solid ${hasPos?'#e5e7eb':'#fde68a'}`}}>
+                        <div>
+                          <div style={{fontSize:'12px',fontWeight:'600',color:'#111827'}}>{veh?.label||vn}</div>
+                          <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>{vn}</div>
+                        </div>
+                        <select value={assign.posLC||''}
+                          onChange={e=>setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),posLC:e.target.value}}))}
+                          style={{...INP,fontSize:'11.5px',borderColor:hasPos?'#bbf7d0':'#fde68a',
+                            background:hasPos?'#f0fdf4':'#fffbeb'}}>
+                          <option value="">— select max LC —</option>
+                          <optgroup label="Moving (max)">
+                            {(groupedLCs['Moving (max)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
+                          </optgroup>
+                          <optgroup label="All Moving">
+                            {(groupedLCs['Moving (all)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
+                          </optgroup>
+                          <optgroup label="Computed Combos">
+                            {(groupedLCs['Computed Combos']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
+                          </optgroup>
+                        </select>
+                        <select value={assign.negLC||''}
+                          onChange={e=>setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),negLC:e.target.value}}))}
+                          style={{...INP,fontSize:'11.5px'}}>
+                          <option value="">— same as max —</option>
+                          <optgroup label="Moving (min)">
+                            {(groupedLCs['Moving (min)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
+                          </optgroup>
+                          <optgroup label="Moving (all)">
+                            {(groupedLCs['Moving (all)']||[]).map(lc=><option key={lc} value={lc}>{lc}</option>)}
+                          </optgroup>
+                        </select>
+                        <div style={{textAlign:'center',fontFamily:'monospace',fontSize:'12px',
+                          color:tons?'#374151':'#9ca3af',fontWeight:tons?'600':'400'}}>
+                          {tons?tons+' T':'—'}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{marginTop:'10px',display:'flex',gap:'8px',alignItems:'center'}}>
+                  <button onClick={()=>{
+                    // Re-run auto-detection, clearing manual overrides
+                    const loadedLCs = [...new Set(origRows.map(r=>r.load))];
+                    const next = {};
+                    (cfg?.selectedVehicles||[]).forEach(vn=>{
+                      const posLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(max)')||lc.includes('max')))
+                                 || loadedLCs.find(lc=>lc.includes(vn));
+                      const negLC = loadedLCs.find(lc=>lc.includes(vn)&&(lc.includes('(min)')||lc.includes('min')));
+                      if (posLC) next[vn] = { posLC, negLC: negLC||'' };
+                    });
+                    setVehicleLCMap(next);
+                  }} style={{background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'5px',
+                    color:'#1d4ed8',padding:'5px 14px',cursor:'pointer',fontSize:'12px'}}>
+                    ↺ Auto-detect LCs
+                  </button>
+                  <span style={{fontSize:'10.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    {multiVehicleData.length} of {(cfg?.selectedVehicles||[]).length} vehicles have result LCs assigned
+                  </span>
+                </div>
               </div>
+
+              {/* ── Results table ── */}
               {multiVehicleData.length===0?(
                 <div style={{padding:'32px',textAlign:'center',color:'#9ca3af',fontSize:'13px',background:'#f9fafb',borderRadius:'8px',border:'1px dashed #e5e7eb'}}>
-                  No vehicles with known tonnage selected. Add vehicles in Step 5.
+                  Assign LL result cases above for each vehicle to compute ratings.
                 </div>
               ):(
                 <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
                   <div style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 16px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
                     <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Multi-Vehicle Rating Summary</span>
-                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>{ratingMethod} · {ratingLimitState}</span>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#059669',fontWeight:'600'}}>
+                      ✓ Using actual MIDAS result forces per vehicle
+                    </span>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                      {ratingMethod} · {ratingLimitState} · γ_DC={gamDC} · γ_DW={gamDW}
+                    </span>
                     <button onClick={()=>{
-                      const h=['Vehicle','GVW (T)','Inv RF','Inv Tons','Inv Controls','Inv Node','Op RF','Op Tons','Op Controls','Op Node'];
-                      const d=multiVehicleData.map(v=>[v.label,v.tons,v.invRF,v.invTons,v.invGoverns,`${v.invNode} (${v.invPos.toFixed(1)}ft)`,v.opRF,v.opTons,v.opGoverns,`${v.opNode} (${v.opPos.toFixed(1)}ft)`]);
+                      const h=['Vehicle','GVW (T)','LL Max LC','Inv RF','Inv Tons','Inv Controls','Inv Node','Op RF','Op Tons','Op Controls','Op Node'];
+                      const d=multiVehicleData.map(v=>[v.label,v.tons??'—',v.posLC,v.invRF,v.invTons??'—',v.invGoverns,`${v.invNode} (${v.invPos.toFixed(1)}ft)`,v.opRF,v.opTons??'—',v.opGoverns,`${v.opNode} (${v.opPos.toFixed(1)}ft)`]);
                       const csv=[h,...d].map(r=>r.join(',')).join('\n');
                       const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='multi_vehicle_rating.csv';a.click();
                     }} style={{marginLeft:'auto',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'4px 10px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
@@ -3978,15 +4118,20 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                         <tr style={{background:'#f9fafb'}}>
                           <th rowSpan="2" style={{padding:'8px 12px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Vehicle</th>
                           <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>GVW (T)</th>
-                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#1d4ed8',fontSize:'11px',borderBottom:'1px solid #bfdbfe',background:'#eff6ff',borderRight:'1px solid #e5e7eb'}}>Inventory</th>
-                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#7c3aed',fontSize:'11px',borderBottom:'1px solid #ddd6fe',background:'#f5f3ff'}}>Operating</th>
+                          <th rowSpan="2" style={{padding:'8px 10px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'10px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb',maxWidth:'160px'}}>LL Result Case</th>
+                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#1d4ed8',fontSize:'11px',borderBottom:'1px solid #bfdbfe',background:'#eff6ff',borderRight:'1px solid #e5e7eb'}}>
+                            Inventory (γ_LL={gamLL})
+                          </th>
+                          <th colSpan="4" style={{padding:'6px 10px',textAlign:'center',fontWeight:'600',color:'#7c3aed',fontSize:'11px',borderBottom:'1px solid #ddd6fe',background:'#f5f3ff'}}>
+                            Operating (γ_LL={gamLL_op.toFixed(2)})
+                          </th>
                         </tr>
                         <tr style={{background:'#f9fafb'}}>
                           {['RF','Tons','Controls','Location'].map(h=>(
-                            <th key={'inv'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#eff6ff'}}>{h}</th>
+                            <th key={'i'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#eff6ff'}}>{h}</th>
                           ))}
                           {['RF','Tons','Controls','Location'].map(h=>(
-                            <th key={'op'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#f5f3ff'}}>{h}</th>
+                            <th key={'o'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#f5f3ff'}}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -3997,38 +4142,43 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                             <tr key={v.name} style={{borderBottom:'1px solid #f3f4f6',background:i%2===0?'#fff':'#fafafa'}}>
                               <td style={{padding:'8px 12px',fontWeight:'600',color:'#111827',borderRight:'1px solid #e5e7eb'}}>
                                 <div>{v.label}</div>
-                                <div style={{fontSize:'9.5px',fontWeight:'400',color:'#9ca3af'}}>{v.name}</div>
+                                <div style={{fontSize:'9px',fontWeight:'400',color:'#9ca3af'}}>{v.name}</div>
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',borderRight:'1px solid #e5e7eb'}}>{v.tons}</td>
+                              <td style={{padding:'8px 10px',textAlign:'center',borderRight:'1px solid #e5e7eb',color:v.tons?'#374151':'#9ca3af'}}>
+                                {v.tons?v.tons+' T':'—'}
+                              </td>
+                              <td style={{padding:'8px 10px',fontSize:'10px',borderRight:'1px solid #e5e7eb',maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                                title={v.posLC}>
+                                <div style={{color:'#374151'}}>{v.posLC?.replace(/_[^_]+$/,'').slice(0,30)||'—'}</div>
+                                {v.negLC&&<div style={{color:'#9ca3af',fontSize:'9px'}}>min: {v.negLC?.replace(/_[^_]+$/,'').slice(0,25)}</div>}
+                              </td>
                               {/* Inventory */}
                               <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
                                 color:invOk?'#059669':v.invRF>=0.3?'#d97706':'#dc2626',background:'#f8fbff'}}>
                                 {v.invRF.toFixed(3)}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',
-                                color:invOk?'#059669':'#dc2626',background:'#f8fbff'}}>
-                                {v.invTons.toFixed(1)} T
+                              <td style={{padding:'8px 10px',textAlign:'center',color:invOk?'#059669':'#dc2626',fontWeight:'600',background:'#f8fbff'}}>
+                                {v.invTons!=null?v.invTons+' T':'—'}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'11px',background:'#f8fbff'}}>
+                              <td style={{padding:'8px 10px',textAlign:'center',background:'#f8fbff'}}>
                                 {v.invGoverns==='M+'?'M⁺':v.invGoverns==='M-'?'M⁻':'V'}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10.5px',color:'#6b7280',background:'#f8fbff',borderRight:'1px solid #e5e7eb'}}>
-                                N{v.invNode} · {v.invPos.toFixed(1)} ft
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10px',color:'#6b7280',background:'#f8fbff',borderRight:'1px solid #e5e7eb'}}>
+                                N{v.invNode}·{v.invPos.toFixed(1)}ft
                               </td>
                               {/* Operating */}
                               <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'700',
                                 color:opOk?'#059669':v.opRF>=0.3?'#d97706':'#dc2626',background:'#fbf8ff'}}>
                                 {v.opRF.toFixed(3)}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',
-                                color:opOk?'#059669':'#dc2626',background:'#fbf8ff'}}>
-                                {v.opTons.toFixed(1)} T
+                              <td style={{padding:'8px 10px',textAlign:'center',color:opOk?'#059669':'#dc2626',fontWeight:'600',background:'#fbf8ff'}}>
+                                {v.opTons!=null?v.opTons+' T':'—'}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'11px',background:'#fbf8ff'}}>
+                              <td style={{padding:'8px 10px',textAlign:'center',background:'#fbf8ff'}}>
                                 {v.opGoverns==='M+'?'M⁺':v.opGoverns==='M-'?'M⁻':'V'}
                               </td>
-                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10.5px',color:'#6b7280',background:'#fbf8ff'}}>
-                                N{v.opNode} · {v.opPos.toFixed(1)} ft
+                              <td style={{padding:'8px 10px',textAlign:'center',fontSize:'10px',color:'#6b7280',background:'#fbf8ff'}}>
+                                N{v.opNode}·{v.opPos.toFixed(1)}ft
                               </td>
                             </tr>
                           );
@@ -4036,10 +4186,10 @@ function StepResults({ cfg, rows: origRows, setRows, rawText, setRawText, mode, 
                       </tbody>
                     </table>
                   </div>
-                  <div style={{padding:'8px 14px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
-                    fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
-                    LL demands scaled proportionally to vehicle GVW — run separate MIDAS analyses with each vehicle for exact results.
-                    Inventory γ_LL={gamLL} · Operating γ_LL={gamLL_op.toFixed(2)}
+                  <div style={{padding:'8px 14px',background:'#f0fdf4',borderTop:'1px solid #bbf7d0',
+                    fontSize:'10px',fontFamily:'monospace',color:'#166534'}}>
+                    ✓ Rating computed using actual MIDAS beam force output per vehicle — not proportional scaling.
+                    φ_c={phiC} · φ_s={phiS} · φ_f={ratingPhiF} · φ_v={ratingPhiV} · LL scale ×{ratingLLScale.toFixed(4)}
                   </div>
                 </div>
               )}
