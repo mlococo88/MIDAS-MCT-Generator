@@ -2348,6 +2348,60 @@ const FATIGUE_P = { 1:1.00, 2:0.85, 3:0.80 };
 const FATIGUE_GAMMA = { 'I':1.5, 'II':0.75 };
 
 // Legal LL factors by ADTT — MBE Table 6A.4.4.2.3a-1
+// ── PS Concrete capacity helpers ─────────────────────────────────────────────
+// γ_p factor based on fpy/fpu ratio — AASHTO 5.6.3.1.1
+function psGammaP(fpu, fpy) {
+  const r = fpy / fpu;
+  if (r >= 0.9)  return 0.28;
+  if (r >= 0.85) return 0.38;
+  return 0.55; // fpy/fpu ≥ 0.60
+}
+
+// β1 from f'c — AASHTO 5.6.2.2
+function psBeta1(fc) {
+  if (fc <= 4) return 0.85;
+  return Math.max(0.65, 0.85 - 0.05*(fc - 4));
+}
+
+// Compute fps (stress in PS steel at nominal resistance) — AASHTO 5.6.3.1.1
+function computePSfps(z) {
+  const { Aps=0, fpu=270, fpy=243, dp=0, fc=5, b=48, bw=7,
+          As=0, Asp=0, fy=60, ds=0, dsp=0 } = z;
+  if (!Aps || !dp || !fc || !b) return { fps:0, a:0, c:0 };
+  const beta1 = psBeta1(fc);
+  const gamP  = psGammaP(fpu, fpy);
+  const rhop  = Aps / (b * dp);
+  const omg   = As  > 0 && ds  > 0 ? (As /(b*ds)) *(fy /fc) : 0;
+  const omgp  = Asp > 0 && dsp > 0 ? (Asp/(b*dsp))*(fy /fc) : 0;
+  const k     = gamP / beta1;
+  const fps   = fpu * (1 - k * (rhop*(fpu/fc) + (ds/dp||0)*(omg - omgp)));
+  // Depth of stress block
+  const a = (Aps*fps + As*fy - Asp*fy) / (0.85 * fc * b);
+  const c = a / beta1;
+  return { fps: Math.max(0, Math.min(fps, fpu)), a: Math.max(0,a), c: Math.max(0,c) };
+}
+
+// Compute Mn (ft-kips) from PS zone — AASHTO 5.6.3.2
+function computePSMn(z) {
+  const { Aps=0, dp=0, As=0, fy=60, ds=0, Asp=0, dsp=0 } = z;
+  const { fps, a } = computePSfps(z);
+  const Mn = (Aps*fps*(dp - a/2) + As*fy*(ds - a/2) - Asp*fy*(dsp - a/2)) / 12;
+  return Math.max(0, Mn); // ft-kips
+}
+
+// Compute Vn (kips) — AASHTO 5.7.3 simplified (MCFT β=user input, or 2.0 default)
+function computePSVn(z) {
+  const { fc=5, bw=7, dv=0, Av=0, fy=60, s=12,
+          Aps=0, fpe=0, psi=0, beta=2.0, theta=45 } = z;
+  if (!dv || !bw) return 0;
+  const Vc  = 0.0316 * beta * Math.sqrt(fc) * bw * dv;
+  const thr = theta * Math.PI / 180;
+  const Vs  = Av > 0 && s > 0 ? Av * fy * dv * (1/Math.tan(thr)) / s : 0;
+  const Vp  = Aps > 0 && fpe > 0 ? Aps * fpe * Math.sin(psi * Math.PI/180) : 0;
+  const Vn  = Math.min(Vc + Vs + Vp, 0.25 * fc * bw * dv);
+  return Math.max(0, Vn);
+}
+
 function legalLLfactor(adtt) {
   if (adtt == null || adtt < 0) return 1.45; // Unknown → 1.45
   if (adtt >= 5000) return 1.45;
@@ -2589,6 +2643,9 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
   const rfYMax            = R.rfYMax      ?? 3;
   const vehicleLCMap      = R.vehicleLCMap ?? {};
 
+  // Structure type — governs which capacity zone type and which tabs show
+  const structType  = R.structType ?? 'steel'; // 'steel' | 'psconc'
+
   // Service II inputs
   const serviceIIDcLC     = R.serviceIIDcLC    ?? '';
   const serviceIIDwLC     = R.serviceIIDwLC    ?? '';
@@ -2605,6 +2662,14 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
   const fatigueCategory   = R.fatigueCategory    ?? 'C';
   const fatigueLimitState = R.fatigueLimitState  ?? 'I';
   const fatigueZoneCategories = R.fatigueZoneCategories ?? {};
+
+  // PS Concrete — Service III inputs
+  const ps3DcLC      = R.ps3DcLC      ?? '';
+  const ps3DwLC      = R.ps3DwLC      ?? '';
+  const ps3LLposLC   = R.ps3LLposLC   ?? '';
+  const ps3LLnegLC   = R.ps3LLnegLC   ?? '';
+  const ps3GamLL     = R.ps3GamLL     ?? 0.8;
+  const ps3Exposure  = R.ps3Exposure  ?? 'moderate';
 
   // Setters — all write through to cfg.rating
   const setRatingMethod     = v => setRating('method',v);
@@ -2693,6 +2758,13 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
         MnNeg: z.ZxNeg>0 ? z.Fy*z.ZxNeg/12 : z.MnNeg,
         Vn:    z.Aw>0    ? 0.6*z.Fy*z.Aw   : z.Vn,
       };
+    }
+    if (z.type==='psconc') {
+      const MnPos = z.Aps>0&&z.dp>0 ? computePSMn(z) : (z.MnPos||0);
+      const Vn    = z.dv>0          ? computePSVn(z)  : (z.Vn||0);
+      return { MnPos, MnNeg: MnPos*0.7, Vn,  // MnNeg approx for PS (often not critical)
+               SbPos: z.Sb||0, StPos: z.St||0, fpe: z.fpe||0, fc: z.fc||5,
+               _zone: z }; // carry zone for Service III
     }
     return {MnPos:z.MnPos||0, MnNeg:z.MnNeg||0, Vn:z.Vn||0};
   };
@@ -2989,6 +3061,108 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
 
   const govFatigue = fatigueData.length
     ? fatigueData.reduce((a,b)=>a.rfGov<b.rfGov?a:b, fatigueData[0])
+    : null;
+
+  // ── PS Concrete Strength I rating ────────────────────────────────────────
+  // Uses the same computeNodeRF formula — capAt() now returns PS Mn when type='psconc'
+  // This useMemo is just ratingData re-used; capAt handles the capacity difference
+  // ps3 = Service III — dedicated check per AASHTO MBE 6A.5.4.2
+  // f_bot = MDC/Sb + MDW/Sb + γ_LL·MLL/Sb ≤ fr + fpe (compression positive)
+  // RF = (fr + fpe - fDC - fDW) / (γ_LL · fLL)
+  const psServiceIIIData = useMemo(()=>{
+    if (!capZones.length || !origRows.length || !ps3LLposLC) return [];
+    const hasPSzones = capZones.some(z=>z.type==='psconc');
+    if (!hasPSzones) return [];
+
+    const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
+      .filter(n=>nodePositions[n]!==undefined)
+      .sort((a,b)=>nodePositions[a]-nodePositions[b]);
+
+    // Modulus of rupture — AASHTO 5.4.2.6
+    // Moderate exposure: fr = 0.19·√f'c (ksi)
+    // Severe exposure:   fr = 0.0948·√f'c (ksi)  [cracked section allowed]
+    const frCoeff = ps3Exposure==='severe' ? 0.0948 : 0.19;
+
+    return nodeList.map(node=>{
+      const xPos = nodePositions[node]??0;
+      const z = capZones.find(z=>xPos>=parseFloat(z.startX)-0.001&&xPos<parseFloat(z.endX)+0.001)
+             || capZones[capZones.length-1];
+      if (z?.type !== 'psconc') return null;
+
+      const dc  = ps3DcLC  ? origRows.find(r=>r.load===ps3DcLC &&r.node===node) : null;
+      const dw  = ps3DwLC  ? origRows.find(r=>r.load===ps3DwLC &&r.node===node) : null;
+      const llp = origRows.find(r=>r.load===ps3LLposLC&&r.node===node);
+      const lln = ps3LLnegLC ? origRows.find(r=>r.load===ps3LLnegLC&&r.node===node) : llp;
+      if (!llp) return null;
+
+      const Sb  = z.Sb || 0;   // in³ — bottom fiber section modulus
+      const St  = z.St || 0;   // in³ — top fiber section modulus
+      const fpe = z.fpe || 0;  // ksi — effective prestress at bottom fiber (compression +)
+      const fc  = z.fc  || 5;  // ksi — concrete strength
+      if (!Sb) return null;
+
+      const fr  = +(frCoeff * Math.sqrt(fc)).toFixed(4); // ksi
+
+      // Moments (ft-kips), signs: positive = sagging
+      const MDC  = dc?.momentY  || 0;
+      const MDW  = dw?.momentY  || 0;
+      const MLLp = Math.max(0, llp?.momentY||0);  // positive envelope
+      const MLLn = Math.abs(Math.min(0, lln?.momentY||0)); // negative envelope magnitude
+
+      // Bottom fiber stresses (ksi) — tension positive convention
+      // For positive moment: bottom in tension
+      const fDCbot  = -(MDC * 12) / Sb;   // prestress opposes tension, so sagging MDC is tension at bottom → negative
+      const fDWbot  = -(MDW * 12) / Sb;
+      const fLLbot  = -(MLLp * 12) / Sb;
+
+      // Net bottom fiber stress (tension +, compression -)
+      // With prestress: σ_bot = -fpe + fDCbot + fDWbot + γ_LL·fLLbot
+      // Limit: σ_bot ≤ fr (tension limit)
+      // RF = (fr + fpe + fDCbot + fDWbot) / (ps3GamLL · |fLLbot|)
+      // Where fDCbot,fDWbot are already negative for sagging (tension at bottom)
+      // More carefully: tensile demand = fDCbot + fDWbot + γ_LL·fLLbot (each negative = compressive, positive = tensile)
+      // Available tension resistance = fr + fpe
+      const demandBot = -(fDCbot + fDWbot); // tension demand from DC+DW (positive = tension)
+      const fLLdemand = -fLLbot;            // LL tension demand per unit γ
+      const rfPos = fLLdemand > 0.001
+        ? +((fr + fpe - demandBot) / (ps3GamLL * fLLdemand)).toFixed(4)
+        : null;
+
+      // Top fiber check for negative moment (continuous spans)
+      const rfNeg = St > 0 && MLLn > 0.001 ? (()=>{
+        const fDCtop  = +(MDC * 12) / St;  // hogging → tension at top
+        const fDWtop  = +(MDW * 12) / St;
+        const fLLtop  = +(MLLn* 12) / St;
+        const frTop   = +(frCoeff * Math.sqrt(fc)).toFixed(4);
+        const fpeTTop = z.fpeTop || 0;  // effective prestress at top fiber if any
+        const dTop    = fDCtop + fDWtop;
+        return dTop+ps3GamLL*fLLtop > 0.001
+          ? +((frTop + fpeTTop - dTop) / (ps3GamLL * fLLtop)).toFixed(4)
+          : null;
+      })() : null;
+
+      const rfGov = [rfPos,rfNeg].filter(v=>v!=null&&isFinite(v)).length
+        ? Math.min(...[rfPos,rfNeg].filter(v=>v!=null&&isFinite(v)))
+        : null;
+      if (rfGov===null) return null;
+
+      return {
+        node, pos:xPos,
+        Sb:+Sb.toFixed(1), St:+St.toFixed(1), fc, fpe:+fpe.toFixed(3), fr:+fr.toFixed(4),
+        MDC:+MDC.toFixed(1), MDW:+MDW.toFixed(1),
+        MLLpos:+MLLp.toFixed(1), MLLneg:+MLLn.toFixed(1),
+        fDCbot:+fDCbot.toFixed(4), fDWbot:+fDWbot.toFixed(4), fLLbot:+fLLbot.toFixed(4),
+        demandBot:+demandBot.toFixed(4), fLLdemand:+fLLdemand.toFixed(4),
+        rfPos, rfNeg, rfGov:+rfGov.toFixed(4),
+        governs: rfNeg!=null&&rfPos!=null&&rfNeg<rfPos ? 'Top (neg.)' : 'Bottom (pos.)',
+        limit:+(fr+fpe).toFixed(4),
+      };
+    }).filter(Boolean);
+  },[origRows, capZones, nodePositions, ps3DcLC, ps3DwLC, ps3LLposLC, ps3LLnegLC,
+     ps3GamLL, ps3Exposure]);
+
+  const govPS3 = psServiceIIIData.length
+    ? psServiceIIIData.reduce((a,b)=>a.rfGov<b.rfGov?a:b, psServiceIIIData[0])
     : null;
 
   // ── Multi-vehicle rating table ────────────────────────────────────────────
@@ -3509,9 +3683,10 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                 {id:'inputs',   label:'⚙ Inputs & Setup'},
                 {id:'table',    label:'📋 Multi-Vehicle Table', locked:!hasData},
                 {id:'dc',       label:'📊 Demand vs. Capacity', locked:!hasData},
-                {id:'serviceII',label:'🔧 Service II',          locked:!hasData},
-                {id:'fatigue',  label:'💀 Fatigue',             locked:!hasData},
-                {id:'card',     label:'🗒 Report Card',         locked:!hasData},
+                {id:'serviceII',label:'🔧 Service II (Steel)',   locked:!hasData},
+                {id:'fatigue',  label:'💀 Fatigue',              locked:!hasData},
+                {id:'ps3',      label:'🟦 PS Service III',       locked:!hasData},
+                {id:'card',     label:'🗒 Report Card',          locked:!hasData},
               ].map(t=>(
                 <button key={t.id} onClick={()=>!t.locked&&setRatingSubTab(t.id)}
                   disabled={t.locked}
@@ -3940,11 +4115,11 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     </div>
                     {/* Type toggle */}
                     <div style={{display:'flex',borderRadius:'5px',overflow:'hidden',border:'1px solid #e5e7eb'}}>
-                      {['manual','quickcalc'].map(t=>(
+                      {[['manual','Manual'],['quickcalc','Steel Calc'],['psconc','PS Conc']].map(([t,lbl])=>(
                         <button key={t} onClick={()=>updateCapZone(z.id,'type',t)} style={{
                           padding:'4px 10px',border:'none',cursor:'pointer',fontSize:'11px',
                           background:z.type===t?col:'#fff',color:z.type===t?'#fff':'#6b7280',fontWeight:z.type===t?'600':'400'}}>
-                          {t==='manual'?'Manual':'Quick Calc'}
+                          {lbl}
                         </button>
                       ))}
                     </div>
@@ -4020,11 +4195,135 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     </div>
                   )}
 
-                  {/* Effective capacity after φ */}
+                  {/* PS Concrete Inputs */}
+                  {z.type==='psconc'&&(<div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                    {/* Section info banner */}
+                    <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#7c3aed',
+                      padding:'4px 8px',background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:'4px'}}>
+                      AASHTO 5.6.3 — PS flexure · 5.7.3 — PS shear · Mn and Vn computed from section properties
+                    </div>
+
+                    {/* Row 1: Concrete + section geometry */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'6px'}}>
+                      {[["f'c (ksi)",'fc',5,0.5],["β₁",'beta1',0,'auto'],["b (in) flange",'b',48,1],
+                        ["bw (in) web",'bw',7,0.5],["dv (in) eff. shear",'dv',0,0.5]
+                      ].map(([lbl,field,def,step])=>(
+                        <div key={field}>
+                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                          <input type="number" step={step||0.1} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                            value={field==='beta1'?(z.beta1||psBeta1(z.fc||5).toFixed(2)):z[field]||def}
+                            placeholder={field==='beta1'?psBeta1(z.fc||5).toFixed(2):String(def)}
+                            onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Row 2: Prestressing steel */}
+                    <div style={{padding:'7px 10px',background:'#faf5ff',border:'1px solid #e9d5ff',borderRadius:'4px'}}>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#7c3aed',fontWeight:'600',marginBottom:'5px'}}>
+                        Prestressing Steel
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'6px'}}>
+                        {[["Aps (in²)",'Aps',0,0.01],["fpu (ksi)",'fpu',270,1],
+                          ["fpy (ksi)",'fpy',243,1],["dp (in)",'dp',0,0.5],
+                          ["fpe (ksi)",'fpe',0,1]
+                        ].map(([lbl,field,def,step])=>(
+                          <div key={field}>
+                            <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                              value={z[field]||''}  placeholder={String(def)}
+                              onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop:'4px',fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                        fpe = effective prestress after losses (ksi) · used for Service III bottom fiber check
+                      </div>
+                    </div>
+
+                    {/* Row 3: Non-prestressed steel */}
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'6px'}}>
+                      {[["As (in²) tension",'As',0,0.01],["fy (ksi)",'fy',60,1],
+                        ["ds (in)",'ds',0,0.5],["As' (in²) comp.",'Asp',0,0.01]
+                      ].map(([lbl,field,def,step])=>(
+                        <div key={field}>
+                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                          <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                            value={z[field]||''} placeholder={String(def)}
+                            onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Row 4: Shear reinforcement + section moduli */}
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px'}}>
+                      <div style={{padding:'7px 10px',background:'#fff7ed',border:'1px solid #fed7aa',borderRadius:'4px'}}>
+                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#ea580c',fontWeight:'600',marginBottom:'5px'}}>
+                          Shear Reinforcement (MCFT)
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'5px'}}>
+                          {[["Av (in²)",'Av',0,0.01],["s (in)",'s',12,1],
+                            ["β",'beta',2.0,0.1],["θ (°)",'theta',45,1],
+                            ["ψ (°) Vp",'psi',0,1],["fpe· Aps",'fpe','↑','—']
+                          ].filter(([,f])=>f!=='fpe').map(([lbl,field,def,step])=>(
+                            <div key={field}>
+                              <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                              <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                                value={z[field]||''} placeholder={String(def)}
+                                onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{padding:'7px 10px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#1d4ed8',fontWeight:'600',marginBottom:'5px'}}>
+                          Section Moduli — Service III
+                        </div>
+                        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'5px'}}>
+                          {[["Sb (in³) bottom",'Sb',0],["St (in³) top",'St',0],
+                            ["fpe top (ksi)",'fpeTop',0],["Exposure",'exposure','mod']
+                          ].map(([lbl,field,def])=>(
+                            field==='exposure' ? (
+                              <div key={field}>
+                                <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                                <select value={ps3Exposure} onChange={e=>setRating('ps3Exposure',e.target.value)}
+                                  style={{...INP2,fontSize:'11px'}}>
+                                  <option value="moderate">Moderate</option>
+                                  <option value="severe">Severe</option>
+                                </select>
+                              </div>
+                            ) : (
+                              <div key={field}>
+                                <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                                <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                                  value={z[field]||''} placeholder={String(def)}
+                                  onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                              </div>
+                            )
+                          ))}
+                        </div>
+                        <div style={{marginTop:'4px',fontSize:'8px',fontFamily:'monospace',color:'#9ca3af'}}>
+                          fr = {(0.19*Math.sqrt(z.fc||5)).toFixed(3)} ksi &nbsp;·&nbsp; limit = fr+fpe = {((0.19*Math.sqrt(z.fc||5))+(z.fpe||0)).toFixed(3)} ksi
+                        </div>
+                      </div>
+                    </div>
+                  </div>)}
                   <div style={{marginTop:'8px',padding:'5px 10px',background:'#f0fdf4',border:'1px solid #bbf7d0',
                     borderRadius:'4px',fontSize:'10.5px',fontFamily:'monospace',color:'#166534'}}>
-                    φC → M⁺={effMnPos.toFixed(1)} &nbsp; M⁻={effMnNeg.toFixed(1)} &nbsp; V={effVn.toFixed(1)} &nbsp;
-                    <span style={{color:'#9ca3af'}}>(ft·k / ft·k / kips)</span>
+                    {z.type==='psconc' ? (()=>{
+                      const MnPos = computePSMn(z);
+                      const Vn    = computePSVn(z);
+                      const {fps,a} = computePSfps(z);
+                      const effMnP = phiC*phiS*ratingPhiF*MnPos;
+                      const effVn2 = phiC*phiS*ratingPhiV*Vn;
+                      return <>
+                        φMn = {effMnP.toFixed(1)} ft·k &nbsp;·&nbsp; φVn = {effVn2.toFixed(1)} kips
+                        <span style={{color:'#9ca3af'}}> &nbsp;(fps={fps.toFixed(1)} ksi · a={a.toFixed(2)} in)</span>
+                      </>;
+                    })() : <>
+                      φC → M⁺={effMnPos.toFixed(1)} &nbsp; M⁻={effMnNeg.toFixed(1)} &nbsp; V={effVn.toFixed(1)} &nbsp;
+                      <span style={{color:'#9ca3af'}}>(ft·k / ft·k / kips)</span>
+                    </>}
                   </div>
                 </div>
               );
@@ -5004,6 +5303,178 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
               </div>
             </div>)}
 
+            {/* ════ SUB-TAB: PS CONCRETE SERVICE III ════ */}
+            {ratingSubTab==='ps3'&&(<div>
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111827',marginBottom:'4px'}}>
+                  PS Concrete — Service III Limit State
+                </div>
+                <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',marginBottom:'12px',
+                  padding:'7px 10px',background:'#f5f3ff',border:'1px solid #ddd6fe',borderRadius:'5px'}}>
+                  AASHTO MBE 6A.5.4.2 · Bottom fiber: f_DC/Sb + f_DW/Sb + γ_LL·f_LL/Sb ≤ fr + fpe
+                  &nbsp;·&nbsp; RF = (fr + fpe − fDC − fDW) / (γ_LL · fLL) &nbsp;·&nbsp;
+                  <strong>Requires PS Concrete zones with Sb, St, fpe defined above</strong>
+                </div>
+
+                {/* No PS zones warning */}
+                {!capZones.some(z=>z.type==='psconc')&&(
+                  <div style={{padding:'12px 14px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    ⚠ No PS Concrete capacity zones defined. Go to Inputs → Capacity Zones → select "PS Conc" zone type.
+                  </div>
+                )}
+
+                {/* Load case selectors */}
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:'10px',marginBottom:'14px'}}>
+                  {[
+                    {label:'Dead Load DC',     field:'ps3DcLC',    val:ps3DcLC,    color:'#374151'},
+                    {label:'Dead Load DW',     field:'ps3DwLC',    val:ps3DwLC,    color:'#6b7280'},
+                    {label:'Live Load (max)',   field:'ps3LLposLC', val:ps3LLposLC, color:'#7c3aed'},
+                    {label:'Live Load (min) opt.', field:'ps3LLnegLC', val:ps3LLnegLC, color:'#9ca3af'},
+                  ].map(({label,field,val,color})=>(
+                    <div key={field}>
+                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color,fontWeight:'500',marginBottom:'4px'}}>{label}</div>
+                      <select value={val} onChange={e=>setRating(field,e.target.value)} style={{...INP,fontSize:'12px'}}>
+                        <option value="">— none —</option>
+                        {Object.entries(groupedLCs).map(([grp,lcs])=>lcs.length>0?(
+                          <optgroup key={grp} label={grp}>{lcs.map(lc=><option key={lc} value={lc}>{lc}</option>)}</optgroup>
+                        ):null)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+
+                {/* γ_LL and exposure */}
+                <div style={{display:'flex',gap:'20px',alignItems:'center',marginBottom:'16px',flexWrap:'wrap'}}>
+                  <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                    <span style={{fontSize:'11px',fontFamily:'monospace',color:'#374151'}}>γ_LL (Service III)</span>
+                    <input type="number" step="0.05" min="0" max="2" value={ps3GamLL}
+                      onChange={e=>setRating('ps3GamLL',parseFloat(e.target.value)||0.8)}
+                      style={{...INP2,width:'72px',fontFamily:'monospace',fontWeight:'700'}}/>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                      LRFR: Inventory=0.8 · Operating=1.0 &nbsp;|&nbsp; LFR: 1.0
+                    </span>
+                  </div>
+                  <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                    <span style={{fontSize:'11px',fontFamily:'monospace',color:'#374151'}}>Exposure</span>
+                    <div style={{display:'flex',borderRadius:'5px',overflow:'hidden',border:'1px solid #e5e7eb'}}>
+                      {[['moderate','Moderate (fr=0.19√f\'c)'],['severe','Severe (fr=0.0948√f\'c)']].map(([v,lbl])=>(
+                        <button key={v} onClick={()=>setRating('ps3Exposure',v)}
+                          style={{padding:'5px 12px',border:'none',cursor:'pointer',fontSize:'11px',
+                            background:ps3Exposure===v?'#7c3aed':'#fff',
+                            color:ps3Exposure===v?'#fff':'#6b7280',fontWeight:ps3Exposure===v?'600':'400'}}>
+                          {lbl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Results */}
+                {psServiceIIIData.length===0&&ps3LLposLC&&(
+                  <div style={{padding:'10px 14px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    ⚠ No results — verify PS Concrete zones have Sb &gt; 0 and fpe defined, and that the selected
+                    LC names match nodes in the loaded results.
+                  </div>
+                )}
+
+                {psServiceIIIData.length>0&&(<>
+                  {/* Summary cards */}
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'10px',marginBottom:'14px'}}>
+                    {[
+                      {label:'Min RF (governing)', value:govPS3?.rfGov?.toFixed(3)??'—',
+                       color:govPS3?.rfGov>=1?'#059669':govPS3?.rfGov>=0.5?'#d97706':'#dc2626'},
+                      {label:'Governing node', value:govPS3?`N${govPS3.node} · ${govPS3.pos.toFixed(2)} ft`:'—', color:'#374151'},
+                      {label:'Controls',  value:govPS3?.governs??'—', color:'#7c3aed'},
+                      {label:'fr + fpe limit', value:govPS3?`${govPS3.limit.toFixed(3)} ksi`:'—', color:'#059669'},
+                    ].map(({label,value,color})=>(
+                      <div key={label} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'7px',padding:'10px 14px'}}>
+                        <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'4px'}}>{label}</div>
+                        <div style={{fontSize:'16px',fontWeight:'700',fontFamily:'monospace',color}}>{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                      <thead>
+                        <tr style={{background:'#f9fafb'}}>
+                          {/* Group row */}
+                          <th colSpan="2" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}/>
+                          <th colSpan="2" style={{padding:'5px 8px',textAlign:'center',fontSize:'9.5px',fontWeight:'600',
+                            color:'#7c3aed',background:'#f5f3ff',borderBottom:'1px solid #ddd6fe',borderRight:'1px solid #e5e7eb'}}>
+                            Section Props
+                          </th>
+                          <th colSpan="3" style={{padding:'5px 8px',textAlign:'center',fontSize:'9.5px',fontWeight:'600',
+                            color:'#374151',background:'#f0f9ff',borderBottom:'1px solid #bfdbfe',borderRight:'1px solid #e5e7eb'}}>
+                            Moments (ft·k)
+                          </th>
+                          <th colSpan="3" style={{padding:'5px 8px',textAlign:'center',fontSize:'9.5px',fontWeight:'600',
+                            color:'#374151',background:'#fff7ed',borderBottom:'1px solid #fed7aa',borderRight:'1px solid #e5e7eb'}}>
+                            Bottom Fiber Stress (ksi)
+                          </th>
+                          <th colSpan="3" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb'}}/>
+                        </tr>
+                        <tr style={{background:'#f9fafb'}}>
+                          {['Node','Pos (ft)',
+                            'Sb (in³)','fpe (ksi)',
+                            'M_DC','M_DW','M_LL',
+                            'f_DC','f_DW','f_LL',
+                            'Limit (ksi)','RF Bot.','RF Top','RF Gov','Status'
+                          ].map((h,hi)=>(
+                            <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',color:'#6b7280',
+                              fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',whiteSpace:'nowrap',
+                              borderRight:[1,3,6,9].includes(hi)?'1px solid #e5e7eb':'none'}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...psServiceIIIData].sort((a,b)=>a.rfGov-b.rfGov).map(p=>{
+                          const col = p.rfGov>=1?'#059669':p.rfGov>=0.5?'#d97706':'#dc2626';
+                          const bg  = p.rfGov>=1?'#f0fdf4':p.rfGov>=0.5?'#fffbeb':'#fef2f2';
+                          return (
+                            <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                              <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
+                              <td style={{padding:'5px 8px',borderRight:'1px solid #e5e7eb'}}>{p.pos.toFixed(2)}</td>
+                              <td style={{padding:'5px 8px',color:'#7c3aed'}}>{p.Sb}</td>
+                              <td style={{padding:'5px 8px',color:'#7c3aed',borderRight:'1px solid #e5e7eb'}}>{p.fpe}</td>
+                              <td style={{padding:'5px 8px',background:'#f8fcff'}}>{p.MDC.toFixed(1)}</td>
+                              <td style={{padding:'5px 8px',background:'#f8fcff'}}>{p.MDW.toFixed(1)}</td>
+                              <td style={{padding:'5px 8px',background:'#f8fcff',borderRight:'1px solid #e5e7eb'}}>{p.MLLpos.toFixed(1)}</td>
+                              <td style={{padding:'5px 8px',background:'#fffaf5'}}>{p.fDCbot.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px',background:'#fffaf5'}}>{p.fDWbot.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px',background:'#fffaf5',borderRight:'1px solid #e5e7eb'}}>{p.fLLbot.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px',color:'#059669',fontWeight:'600'}}>{p.limit.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px',color:p.rfPos>=1?'#059669':'#dc2626',fontWeight:'600'}}>
+                                {p.rfPos?.toFixed(3)??'—'}
+                              </td>
+                              <td style={{padding:'5px 8px',color:p.rfNeg!=null?(p.rfNeg>=1?'#059669':'#dc2626'):'#9ca3af',fontWeight:'600'}}>
+                                {p.rfNeg?.toFixed(3)??'—'}
+                              </td>
+                              <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
+                              <td style={{padding:'5px 8px'}}>
+                                <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
+                                  padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                                  {p.rfGov>=1?'✓ OK':p.rfGov>=0.5?'⚠ Low':'❌ FAIL'}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{padding:'6px 12px',background:'#f9fafb',borderTop:'1px solid #e5e7eb',
+                    fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    γ_LL={ps3GamLL} · fr=0.19√f'c ({ps3Exposure}) · limit=fr+fpe · all stresses in ksi · f=M·12/Sb
+                    &nbsp;·&nbsp; MBE 6A.5.4.2
+                  </div>
+                </>)}
+              </div>
+            </div>)}
+
             {/* ════ SUB-TAB: RATING REPORT CARD ════ */}
             {ratingSubTab==='card'&&(<div>
               {(()=>{
@@ -5626,6 +6097,7 @@ const DEFAULT_CFG = {
   laneName:'Suspended Span',laneWidth:10,laneWheelSpacing:6,
   // ── Rating inputs (persisted) ─────────────────────────────────────────────
   rating: {
+    structType:'steel',  // 'steel' | 'psconc'
     method:'LRFR', level:'Inventory', limitState:'Strength I',
     category:'Design', adtt:5000,
     dcLC:'', dwLC:'', llposLC:'', llnegLC:'',
@@ -5642,14 +6114,18 @@ const DEFAULT_CFG = {
     ],
     vehicleTon:36, vehicleName:'HL-93 Design Truck',
     rfYMax:3, vehicleLCMap:{},
-    // Service II
+    // Service II (steel)
     serviceIIDcLC:'', serviceIIDwLC:'', serviceIILLposLC:'', serviceIILLnegLC:'',
     serviceIIRh:1.0,
     // Fatigue
     fatigueLCpos:'', fatigueLCneg:'',
     fatigueAdtt:5000, fatigueLanes:2, fatigueCyclesN:1,
     fatigueCategory:'C', fatigueLimitState:'I',
-    fatigueZoneCategories:{}, // {[zoneId]: category}
+    fatigueZoneCategories:{},
+    // PS Concrete — Service III
+    ps3DcLC:'', ps3DwLC:'', ps3LLposLC:'', ps3LLnegLC:'',
+    ps3GamLL:0.8,    // AASHTO MBE 6A.5.4.2 — 0.8 for Inventory, 1.0 for Operating
+    ps3Exposure:'moderate', // 'moderate' | 'severe'
   },
 };
 // loadCombos is computed from deadLoads so it can reference names
