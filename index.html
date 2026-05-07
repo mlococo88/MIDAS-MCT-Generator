@@ -419,24 +419,43 @@ function generateMCT(cfg) {
   }
   p(``);
 
-  const activeVehicles=ALL_VEHICLES.filter(v=>selectedVehicles.includes(v.name));
+  const activeVehicles = ALL_VEHICLES.filter(v=>selectedVehicles.includes(v.name));
+  const mctVehicles    = activeVehicles.filter(v=>v.code!=='TRAIN');
+  const trainVehicles  = activeVehicles.filter(v=>v.code==='TRAIN');
+
+  // Write all vehicles in *VEHICLE — highway vehicles use library reference,
+  // railroad vehicles use MIDAS train load format (2, YES, W1, D1, W2, PLV, NDIST)
   if(activeVehicles.length>0){
-    p(`*VEHICLE    ; Vehicles`,`; NAME=NAME, 1, TYPE-NAME, DLA, CODE, bFATI, bTDM`);
-    activeVehicles.forEach(v=>{
-      if(v.code==='TRAIN'){
-        // Railroad / user-defined vehicle — write axle pattern inline
-        p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, USER, NO, NO`);
-        p(`   POINT, ${v.axles.length}`);
-        v.axles.forEach(a=>p(`   ${a.load.toFixed(3)}, ${a.dist.toFixed(4)}`));
-        if(v.trailingLoad>0){
-          const lastDist = v.axles[v.axles.length-1].dist;
-          p(`   UNIFORM, ${lastDist.toFixed(4)}, ${(lastDist+500).toFixed(4)}, ${v.trailingLoad.toFixed(3)}`);
-        }
-      } else {
-        p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, ${v.code}, NO, NO`);
-      }
+    p(`*VEHICLE    ; Vehicles`);
+    p(`; NAME=NAME, 1, TYPE-NAME, DLA, CODE, bFATI, bTDM                   ; standard`);
+    p(`; NAME=NAME, 2, bTRAIN, W(W1), PL(D1), PLM(W2), PLV(D2), NDIST     ; user train`);
+    p(`;      LOAD1, DIST1(spacing to next), LOAD2, DIST2, ..., LOADn, 0  ; axle pairs`);
+
+    // Standard highway vehicles
+    mctVehicles.forEach(v=>{
+      p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, ${v.code}, NO, NO`);
+    });
+
+    // Railroad / train vehicles — MIDAS user train format
+    trainVehicles.forEach(v=>{
+      const trailing = v.trailingLoad || 0;
+      // Build spacing sequence from cumulative distances
+      const spacings = v.axles.map((a,i)=>
+        i < v.axles.length-1
+          ? +(v.axles[i+1].dist - a.dist).toFixed(4)
+          : 0  // 0 terminates the last axle
+      );
+      // Format: load, spacing_to_next for each axle
+      const axlePairs = v.axles.map((a,i)=>
+        `${a.load % 1 === 0 ? a.load.toFixed(0) : a.load.toFixed(3)}, ${spacings[i]}`
+      ).join(', ');
+      // Header: NAME, 2, YES(train), W1(leading uniform=0), D1(0), W2(trailing), 2, 0
+      p(`   NAME=${v.name}, 2, YES, 0, 0, ${trailing}, 2, 0`);
+      p(`        ${axlePairs}`);
     });
     p(``);
+
+    // *MVLDCASE for ALL vehicles (highway + railroad)
     p(`*MVLDCASE   ; Moving Load Cases`);
     activeVehicles.forEach(v=>{
       p(`   NAME=${v.name}_${laneName}, 0, 1, 1, 1, 1, 1, 1, INDEPENDENT, , 0, NO, 0`);
@@ -2071,6 +2090,31 @@ function StepGenerate({mctOutput,downloadMCT,cfg}) {
     {l:'File Lines',    v:mctOutput.split('\n').length},
   ];
   return (<div><StepHeader icon="📄" title="Generate MCT File" sub="Review model summary and download for MIDAS Civil"/>
+    {/* Railroad vehicle info note */}
+    {(()=>{
+      const trainVehs = (cfg.selectedVehicles||[])
+        .map(n=>ALL_VEHICLES.find(v=>v.name===n))
+        .filter(v=>v?.code==='TRAIN');
+      if(!trainVehs.length) return null;
+      return (
+        <div style={{marginBottom:'14px',padding:'10px 14px',background:'#f0fdf4',
+          border:'1px solid #bbf7d0',borderLeft:'4px solid #16a34a',borderRadius:'6px'}}>
+          <div style={{fontSize:'12px',fontWeight:'700',color:'#166534',marginBottom:'4px'}}>
+            🚂 Railroad vehicles included — MIDAS Train Load format
+          </div>
+          <div style={{fontSize:'11px',fontFamily:'monospace',color:'#166534',lineHeight:'1.6'}}>
+            <strong>{trainVehs.map(v=>v.label).join(' · ')}</strong>
+          </div>
+          <div style={{fontSize:'10.5px',fontFamily:'monospace',color:'#15803d',marginTop:'6px',lineHeight:'1.6'}}>
+            Written as <code>NAME=..., 2, YES, dW1, dD1, dW2, dD2, 0</code> with axle load/spacing pairs.
+            Each vehicle also has a corresponding <code>*MVLDCASE</code> entry.
+            {trainVehs.some(v=>v.trailingLoad>0) && (
+              <> Trailing uniform loads: {trainVehs.filter(v=>v.trailingLoad>0).map(v=>`${v.label} = ${v.trailingLoad} k/lf`).join(', ')}.</>
+            )}
+          </div>
+        </div>
+      );
+    })()}
     <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'18px'}}>
       {cards.map(({l,v})=>(
         <div key={l} style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'7px',
