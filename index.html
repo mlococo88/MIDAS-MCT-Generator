@@ -31,36 +31,180 @@ const { useState, useMemo, useEffect, useRef } = React;
 
 const VEHICLE_GROUPS = [
   { group:"AASHTO LRFD", color:"#1d4ed8", vehicles:[
-    { name:"HL-93TRK",  label:"HL-93 Design Truck",  code:"AASHTO-LRFD",               defaultDLA:0  },
-    { name:"HL-93TDM",  label:"HL-93 Design Tandem", code:"AASHTO-LRFD",               defaultDLA:0  },
+    { name:"HL-93TRK", label:"HL-93 Design Truck", code:"AASHTO-LRFD", defaultDLA:0,
+      gvwKips:72, description:'AASHTO LRFD 3.6.1.2.2 — rear axle spacing 14\'–30\' variable to maximize effect · used with 0.64 k/lf lane load',
+      axles:[{load:8,dist:0},{load:32,dist:14},{load:32,dist:28}],
+      trailingLoad:0, trailingNote:'Lane load (0.64 k/lf) applied separately — not included in axle diagram',
+    },
+    { name:"HL-93TDM", label:"HL-93 Design Tandem", code:"AASHTO-LRFD", defaultDLA:0,
+      gvwKips:50, description:'AASHTO LRFD 3.6.1.2.3 — pair of 25-kip axles 4\' apart · used with 0.64 k/lf lane load',
+      axles:[{load:25,dist:0},{load:25,dist:4}],
+      trailingLoad:0, trailingNote:'Lane load (0.64 k/lf) applied separately',
+    },
   ]},
   { group:"AASHTO Standard", color:"#0369a1", vehicles:[
-    { name:"H20-44",    label:"H20-44",               code:"AASHTO-STD",                defaultDLA:0  },
-    { name:"HS20-44",   label:"HS20-44",              code:"AASHTO-STD",                defaultDLA:0  },
+    { name:"H20-44", label:"H20-44", code:"AASHTO-STD", defaultDLA:0,
+      gvwKips:40, description:'AASHTO Standard Spec. — 2-axle truck · 8k front + 32k rear · 14\' spacing',
+      axles:[{load:8,dist:0},{load:32,dist:14}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"HS20-44", label:"HS20-44", code:"AASHTO-STD", defaultDLA:0,
+      gvwKips:72, description:'AASHTO Standard Spec. — 3-axle truck-semitrailer · rear spacing 14\'–30\' variable',
+      axles:[{load:8,dist:0},{load:32,dist:14},{load:32,dist:28}],
+      trailingLoad:0, trailingNote:'Rear spacing 14\'–30\' varies to maximize effect',
+    },
   ]},
   { group:"AASHTO Legal / Posting", color:"#6d28d9", vehicles:[
-    { name:"AASHTO Legal Type 3",     label:"Legal Type 3",   code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
-    { name:"AASHTO Legal Type 3-3",   label:"Legal Type 3-3", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
-    { name:"AASHTO Legal Type 3S2",   label:"Legal Type 3S2", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
-    { name:"AASHTO Posting load SU4", label:"Posting SU4",    code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:33 },
-    { name:"AASHTO Posting load SU5", label:"Posting SU5",    code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
-    { name:"AASHTO Posting load SU6", label:"Posting SU6",    code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
-    { name:"AASHTO Posting load SU7", label:"Posting SU7",    code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0  },
+    { name:"AASHTO Legal Type 3",     label:"Legal Type 3",   code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:50, description:'MBE Appendix D — 3-axle SU truck · 16k front + 17k + 17k tandem (4\' spacing) · 50k GVW = 25T',
+      axles:[{load:16,dist:0},{load:17,dist:15},{load:17,dist:19}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"AASHTO Legal Type 3-3",   label:"Legal Type 3-3", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:80, description:'MBE Appendix D — 6-axle combination truck · 80k GVW = 40T',
+      axles:[{load:10,dist:0},{load:15.5,dist:15},{load:15.5,dist:19},
+             {load:15.5,dist:35},{load:15.5,dist:39},{load:8,dist:50}],
+      trailingLoad:0, trailingNote:'Approximate axle positions — verify against MBE Appendix D',
+    },
+    { name:"AASHTO Legal Type 3S2",   label:"Legal Type 3S2", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:72, description:'MBE Appendix D — 5-axle tractor-semitrailer · 72k GVW = 36T',
+      axles:[{load:10,dist:0},{load:15.5,dist:15},{load:15.5,dist:19},
+             {load:15.5,dist:43},{load:15.5,dist:47}],
+      trailingLoad:0, trailingNote:'Approximate axle positions — verify against MBE Appendix D',
+    },
+    { name:"AASHTO Posting load SU4", label:"Posting SU4", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:33,
+      gvwKips:54, description:'AASHTO posting vehicle — 4-axle SU truck · 54k GVW = 27T',
+      axles:[{load:10,dist:0},{load:11,dist:11},{load:11,dist:16.5},{load:22,dist:20.5}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"AASHTO Posting load SU5", label:"Posting SU5", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:70, description:'AASHTO posting vehicle — 5-axle SU truck · 70k GVW = 35T',
+      axles:[{load:12,dist:0},{load:12,dist:11.5},{load:11.5,dist:17},{load:11.5,dist:21},{load:23,dist:25}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"AASHTO Posting load SU6", label:"Posting SU6", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:87, description:'AASHTO posting vehicle — 6-axle SU truck · 87k GVW = 43.5T',
+      axles:[{load:12,dist:0},{load:12,dist:11.5},{load:12.5,dist:17},{load:12.5,dist:21},{load:19,dist:25},{load:19,dist:29}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"AASHTO Posting load SU7", label:"Posting SU7", code:"AASHTO LEGAL/PERMIT LOAD", defaultDLA:0,
+      gvwKips:105, description:'AASHTO posting vehicle — 7-axle SU truck · 105k GVW = 52.5T',
+      axles:[{load:12,dist:0},{load:12,dist:11.5},{load:12.5,dist:17},{load:12.5,dist:21},
+             {load:19,dist:25},{load:19,dist:29},{load:18,dist:33}],
+      trailingLoad:0, trailingNote:'',
+    },
   ]},
   { group:"FAST Act EV Loads", color:"#059669", vehicles:[
-    { name:"Type EV2", label:"EV2 Electric Vehicle", code:"FAST ACT EV LOADS", defaultDLA:33 },
-    { name:"Type EV3", label:"EV3 Electric Vehicle", code:"FAST ACT EV LOADS", defaultDLA:33 },
+    { name:"Type EV2", label:"EV2 Electric Vehicle", code:"FAST ACT EV LOADS", defaultDLA:33,
+      gvwKips:108, description:'FAST Act §1411 — 3-axle EV · 108k GVW = 54T · AASHTO LRFD 3.6.1.2.4',
+      axles:[{load:22.5,dist:0},{load:52.5,dist:15},{load:33,dist:21}],
+      trailingLoad:0, trailingNote:'',
+    },
+    { name:"Type EV3", label:"EV3 Electric Vehicle", code:"FAST ACT EV LOADS", defaultDLA:33,
+      gvwKips:147, description:'FAST Act §1411 — 4-axle EV · 147k GVW = 73.5T · AASHTO LRFD 3.6.1.2.4',
+      axles:[{load:22.5,dist:0},{load:52.5,dist:15},{load:33,dist:21},{load:39,dist:25}],
+      trailingLoad:0, trailingNote:'Verify axle configuration against latest AASHTO LRFD',
+    },
   ]},
   { group:"RIDOT Operating", color:"#b45309", vehicles:[
-    { name:"RI Operating load OP1", label:"RIDOT OP1", code:"RIDOT LOAD", defaultDLA:33 },
-    { name:"RI Operating load OP2", label:"RIDOT OP2", code:"RIDOT LOAD", defaultDLA:33 },
-    { name:"RI Operating load OP3", label:"RIDOT OP3", code:"RIDOT LOAD", defaultDLA:33 },
+    { name:"RI Operating load OP1", label:"RIDOT OP1", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:80, description:'RIDOT Operating load OP1 — verify axle configuration with RIDOT Bridge Design Manual' },
+    { name:"RI Operating load OP2", label:"RIDOT OP2", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:80, description:'RIDOT Operating load OP2 — verify axle configuration with RIDOT Bridge Design Manual' },
+    { name:"RI Operating load OP3", label:"RIDOT OP3", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:80, description:'RIDOT Operating load OP3 — verify axle configuration with RIDOT Bridge Design Manual' },
   ]},
   { group:"RIDOT Permit", color:"#be123c", vehicles:[
-    { name:"RI Permit load BP1", label:"RIDOT BP1", code:"RIDOT LOAD", defaultDLA:33 },
-    { name:"RI Permit load BP2", label:"RIDOT BP2", code:"RIDOT LOAD", defaultDLA:33 },
-    { name:"RI Permit load BP3", label:"RIDOT BP3", code:"RIDOT LOAD", defaultDLA:33 },
-    { name:"RI Permit load BP4", label:"RIDOT BP4", code:"RIDOT LOAD", defaultDLA:33 },
+    { name:"RI Permit load BP1", label:"RIDOT BP1", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:90, description:'RIDOT Permit load BP1 — verify axle configuration with RIDOT Bridge Design Manual' },
+    { name:"RI Permit load BP2", label:"RIDOT BP2", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:100, description:'RIDOT Permit load BP2 — verify axle configuration with RIDOT Bridge Design Manual' },
+    { name:"RI Permit load BP3", label:"RIDOT BP3", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:110, description:'RIDOT Permit load BP3 — verify axle configuration with RIDOT Bridge Design Manual' },
+    { name:"RI Permit load BP4", label:"RIDOT BP4", code:"RIDOT LOAD", defaultDLA:33,
+      gvwKips:120, description:'RIDOT Permit load BP4 — verify axle configuration with RIDOT Bridge Design Manual' },
+  ]},
+  { group:"Railroad / AREMA", color:"#7c2d12", vehicles:[
+    { name:"AREMA-E80",
+      label:"AREMA Cooper E-80",
+      code:"TRAIN", defaultDLA:0,
+      // Axle loads (kips) and cumulative distances (ft) from leading axle
+      axles:[
+        {load:40,dist:0},{load:80,dist:8},{load:80,dist:13},{load:80,dist:18},{load:80,dist:23},
+        {load:52,dist:32},{load:52,dist:37},{load:52,dist:43},{load:52,dist:48},
+        {load:40,dist:56},
+        {load:80,dist:64},{load:80,dist:69},{load:80,dist:74},{load:80,dist:79},
+        {load:52,dist:88},{load:52,dist:93},{load:52,dist:99},{load:52,dist:104},
+      ],
+      trailingLoad:8,    // kips per linear foot
+      trailingNote:'8,000 lbs/lf uniform trailing load',
+      gvwKips:80,        // rating reference weight per image
+    },
+    { name:"F40PH-280K",
+      label:"F40PH (280K) – Modified",
+      code:"TRAIN", defaultDLA:0,
+      axles:[
+        {load:70,dist:0},{load:70,dist:9},
+        {load:70,dist:33},{load:70,dist:42},
+        {load:70,dist:56.167},{load:70,dist:65.167},
+        {load:70,dist:89.167},{load:70,dist:98.167},
+      ],
+      trailingLoad:2,
+      trailingNote:'2,000 lbs/lf uniform trailing load',
+      gvwKips:280,
+    },
+    { name:"HSP-46-296K",
+      label:"HSP-46 (296K) Locomotive",
+      code:"TRAIN", defaultDLA:0,
+      axles:[
+        {load:74,dist:0},{load:74,dist:9.333},
+        {load:74,dist:45},{load:74,dist:54.333},
+        {load:74,dist:71},{load:74,dist:80.333},
+        {load:74,dist:116},{load:74,dist:125.333},
+      ],
+      trailingLoad:2,
+      trailingNote:'2,000 lbs/lf uniform trailing load',
+      gvwKips:296,
+    },
+    { name:"286K-RailCar",
+      label:"286K Rail Car",
+      code:"TRAIN", defaultDLA:0,
+      axles:[
+        {load:71.5,dist:0},{load:71.5,dist:5.667},
+        {load:71.5,dist:25.25},{load:71.5,dist:30.917},{load:71.5,dist:37.583},{load:71.5,dist:43.25},
+        {load:71.5,dist:62.833},{load:71.5,dist:68.5},{load:71.5,dist:75.167},{load:71.5,dist:80.833},
+        {load:71.5,dist:100.417},{load:71.5,dist:106.083},
+      ],
+      trailingLoad:0,
+      trailingNote:'No uniform trailing load',
+      gvwKips:286,
+    },
+    { name:"315K-CSX",
+      label:"315K CSX Rail Car",
+      code:"TRAIN", defaultDLA:0,
+      axles:[
+        {load:78.75,dist:0},{load:78.75,dist:6},
+        {load:78.75,dist:41.667},{load:78.75,dist:47.667},{load:78.75,dist:55.167},{load:78.75,dist:61.167},
+        {load:78.75,dist:96.833},{load:78.75,dist:102.833},{load:78.75,dist:110.333},{load:78.75,dist:116.333},
+        {load:78.75,dist:152},{load:78.75,dist:158},
+      ],
+      trailingLoad:0,
+      trailingNote:'No uniform trailing load',
+      gvwKips:315,
+    },
+    { name:"ES44AC-432K",
+      label:"ES44AC (432K) for 315K CSX",
+      code:"TRAIN", defaultDLA:0,
+      axles:[
+        {load:72,dist:0},{load:72,dist:6.583},{load:72,dist:13.167},
+        {load:72,dist:46.25},{load:72,dist:52.833},{load:72,dist:59.417},
+        {load:72,dist:73.167},{load:72,dist:79.75},{load:72,dist:86.333},
+        {load:72,dist:119.417},{load:72,dist:126},{load:72,dist:132.583},
+      ],
+      trailingLoad:6,
+      trailingNote:'6,000 lbs/lf uniform trailing load',
+      gvwKips:432,
+    },
   ]},
 ];
 const ALL_VEHICLES = VEHICLE_GROUPS.flatMap(g=>g.vehicles);
@@ -278,7 +422,20 @@ function generateMCT(cfg) {
   const activeVehicles=ALL_VEHICLES.filter(v=>selectedVehicles.includes(v.name));
   if(activeVehicles.length>0){
     p(`*VEHICLE    ; Vehicles`,`; NAME=NAME, 1, TYPE-NAME, DLA, CODE, bFATI, bTDM`);
-    activeVehicles.forEach(v=>p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, ${v.code}, NO, NO`));
+    activeVehicles.forEach(v=>{
+      if(v.code==='TRAIN'){
+        // Railroad / user-defined vehicle — write axle pattern inline
+        p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, USER, NO, NO`);
+        p(`   POINT, ${v.axles.length}`);
+        v.axles.forEach(a=>p(`   ${a.load.toFixed(3)}, ${a.dist.toFixed(4)}`));
+        if(v.trailingLoad>0){
+          const lastDist = v.axles[v.axles.length-1].dist;
+          p(`   UNIFORM, ${lastDist.toFixed(4)}, ${(lastDist+500).toFixed(4)}, ${v.trailingLoad.toFixed(3)}`);
+        }
+      } else {
+        p(`   NAME=${v.name}, 1, ${v.name}, ${getDLA(v.name)}, ${v.code}, NO, NO`);
+      }
+    });
     p(``);
     p(`*MVLDCASE   ; Moving Load Cases`);
     activeVehicles.forEach(v=>{
@@ -1190,6 +1347,191 @@ function StepMovingLoads({cfg,set}) {
         </div>
       </div>
     </div>
+
+    {/* ── Vehicle Details Panel — all selected vehicles ── */}
+    {(()=>{
+      const selVehicles = ALL_VEHICLES.filter(v=>cfg.selectedVehicles.includes(v.name));
+      if(!selVehicles.length) return null;
+
+      const grpColor = v => VEHICLE_GROUPS.find(g=>g.vehicles.some(gv=>gv.name===v.name))?.color || '#374151';
+
+      return (
+        <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',
+          padding:'14px 16px',marginTop:'14px'}}>
+          <div style={{fontSize:'12px',fontWeight:'700',color:'#374151',marginBottom:'12px',
+            display:'flex',alignItems:'center',gap:'8px'}}>
+            📋 Selected Vehicle Details
+            <span style={{fontSize:'10px',fontWeight:'400',color:'#9ca3af',fontFamily:'monospace'}}>
+              {selVehicles.length} vehicle{selVehicles.length!==1?'s':''} selected
+            </span>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:'10px'}}>
+            {selVehicles.map(v=>{
+              const col = grpColor(v);
+              const hasAxles = v.axles && v.axles.length > 0;
+              const gvwTons = VEHICLE_TONS[v.name] ?? (v.gvwKips ? v.gvwKips/2 : null);
+              const dla = cfg.useGlobalDLA ? cfg.globalDLA : (cfg.vehicleDLA?.[v.name] ?? v.defaultDLA ?? 0);
+              const totalAxleLoad = hasAxles ? v.axles.reduce((s,a)=>s+a.load,0) : null;
+              const length = hasAxles ? v.axles[v.axles.length-1].dist : null;
+
+              return (
+                <div key={v.name} style={{border:`1px solid ${col}30`,borderLeft:`3px solid ${col}`,
+                  borderRadius:'6px',overflow:'hidden'}}>
+                  {/* Header */}
+                  <div style={{background:col,color:'#fff',padding:'7px 12px',
+                    display:'flex',gap:'12px',alignItems:'center',flexWrap:'wrap'}}>
+                    <span style={{fontWeight:'700',fontSize:'12px'}}>{v.label}</span>
+                    <span style={{fontSize:'10px',fontFamily:'monospace',opacity:0.85}}>{v.name}</span>
+                    <div style={{marginLeft:'auto',display:'flex',gap:'10px',fontSize:'10px',
+                      fontFamily:'monospace',flexWrap:'wrap'}}>
+                      {gvwTons&&<span style={{background:'rgba(255,255,255,0.15)',padding:'2px 8px',borderRadius:'99px'}}>
+                        GVW: {v.gvwKips??gvwTons*2} kips = {gvwTons} T
+                      </span>}
+                      <span style={{background:'rgba(255,255,255,0.15)',padding:'2px 8px',borderRadius:'99px'}}>
+                        DLA: {dla}%
+                      </span>
+                      <span style={{background:'rgba(255,255,255,0.15)',padding:'2px 8px',borderRadius:'99px'}}>
+                        Code: {v.code}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  {v.description&&(
+                    <div style={{padding:'5px 12px',background:'#f9fafb',borderBottom:'1px solid #f3f4f6',
+                      fontSize:'10px',fontFamily:'monospace',color:'#6b7280'}}>
+                      {v.description}
+                    </div>
+                  )}
+
+                  {/* Axle diagram — only when axle data exists */}
+                  {hasAxles&&(
+                    <div style={{padding:'10px 12px',background:'#fafafa',overflowX:'auto',
+                      borderBottom:'1px solid #f3f4f6'}}>
+                      <svg width={Math.max(420, length*5+100)} height="72"
+                        style={{display:'block'}}>
+                        <line x1="40" y1="46" x2={length*5+60} y2="46"
+                          stroke="#374151" strokeWidth="1.5"/>
+                        {v.axles.map((a,ai)=>{
+                          const x = 40 + a.dist*5;
+                          return (
+                            <g key={ai}>
+                              <circle cx={x} cy="30" r="7" fill="none"
+                                stroke={col} strokeWidth="1.5"/>
+                              <line x1={x} y1="37" x2={x} y2="46"
+                                stroke={col} strokeWidth="1.5"/>
+                              <text x={x} y="22" textAnchor="middle"
+                                fontSize="7.5" fill={col} fontWeight="600"
+                                fontFamily="monospace">
+                                {a.load%1===0?a.load.toFixed(0):a.load.toFixed(2)}k
+                              </text>
+                              {ai>0&&(
+                                <text x={(40+v.axles[ai-1].dist*5+x)/2} y="62"
+                                  textAnchor="middle" fontSize="6.5"
+                                  fill="#6b7280" fontFamily="monospace">
+                                  {(a.dist-v.axles[ai-1].dist).toFixed(2)}'
+                                </text>
+                              )}
+                            </g>
+                          );
+                        })}
+                        {v.trailingLoad>0&&(
+                          <g>
+                            <rect x={length*5+62} y="36" width="32" height="10"
+                              fill="none" stroke={col} strokeWidth="1"/>
+                            {[0,5,10,15,20,25,30].map(xx=>(
+                              <line key={xx} x1={length*5+62+xx} y1="36"
+                                x2={length*5+54+xx} y2="46" stroke={col} strokeWidth="0.8"/>
+                            ))}
+                            <text x={length*5+78} y="26" textAnchor="middle"
+                              fontSize="7" fill={col} fontFamily="monospace">
+                              {v.trailingLoad}k/lf
+                            </text>
+                          </g>
+                        )}
+                      </svg>
+                    </div>
+                  )}
+
+                  {/* Axle table — compact, collapsible */}
+                  {hasAxles&&(
+                    <div style={{overflowX:'auto',maxHeight:'110px'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',
+                        fontSize:'9.5px',fontFamily:'monospace'}}>
+                        <thead>
+                          <tr style={{background:'#f3f4f6'}}>
+                            {['Axle','Load (kips)','Load (lbs)','Dist (ft)','Spacing (ft)'].map(h=>(
+                              <th key={h} style={{padding:'3px 8px',
+                                textAlign:h==='Axle'?'center':'right',fontWeight:'500',
+                                color:'#6b7280',borderBottom:'1px solid #e5e7eb'}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {v.axles.map((a,ai)=>(
+                            <tr key={ai} style={{borderBottom:'1px solid #f3f4f6',
+                              background:ai%2===0?'#fff':'#fafafa'}}>
+                              <td style={{padding:'2px 8px',textAlign:'center',color:'#374151'}}>{ai+1}</td>
+                              <td style={{padding:'2px 8px',textAlign:'right',fontWeight:'600',color:col}}>
+                                {a.load%1===0?a.load.toFixed(0):a.load.toFixed(2)}
+                              </td>
+                              <td style={{padding:'2px 8px',textAlign:'right',color:'#6b7280'}}>
+                                {(a.load*1000).toLocaleString()}
+                              </td>
+                              <td style={{padding:'2px 8px',textAlign:'right'}}>{a.dist.toFixed(3)}</td>
+                              <td style={{padding:'2px 8px',textAlign:'right',color:'#9ca3af'}}>
+                                {ai<v.axles.length-1
+                                  ?(v.axles[ai+1].dist-a.dist).toFixed(3):'—'}
+                              </td>
+                            </tr>
+                          ))}
+                          {v.trailingLoad>0&&(
+                            <tr style={{background:'#fffbeb',borderTop:`1px solid ${col}30`}}>
+                              <td colSpan="2" style={{padding:'3px 8px',color:'#92400e',fontWeight:'600'}}>
+                                Trailing load
+                              </td>
+                              <td style={{padding:'3px 8px',color:'#92400e'}}>
+                                {(v.trailingLoad*1000).toLocaleString()} lbs/lf
+                              </td>
+                              <td colSpan="2" style={{padding:'3px 8px',color:'#9ca3af',fontSize:'8.5px'}}>
+                                {v.trailingNote}
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{background:'#f9fafb',borderTop:'1px solid #e5e7eb'}}>
+                            <td style={{padding:'3px 8px',textAlign:'center',color:'#6b7280',fontWeight:'600'}}>Σ</td>
+                            <td style={{padding:'3px 8px',textAlign:'right',fontWeight:'700',color:col}}>
+                              {totalAxleLoad.toFixed(1)} k
+                            </td>
+                            <td style={{padding:'3px 8px',textAlign:'right',color:'#6b7280'}}>
+                              {(totalAxleLoad*1000).toLocaleString()} lbs
+                            </td>
+                            <td style={{padding:'3px 8px',textAlign:'right',color:'#9ca3af'}}>
+                              over {length.toFixed(2)} ft
+                            </td>
+                            <td/>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* No axle data — show note */}
+                  {!hasAxles&&(
+                    <div style={{padding:'6px 12px',fontSize:'9.5px',fontFamily:'monospace',
+                      color:'#9ca3af',fontStyle:'italic'}}>
+                      Axle configuration defined in MIDAS vehicle library · refer to code documentation for exact axle pattern
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    })()}
   </div>);
 }
 
@@ -2120,30 +2462,41 @@ function ChartCard({title, unit, color, isPrimary, load, chartId, children, onCs
   );
 }
 
-function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
+function RatingChart({ ratingData, operatingData=[], nodePositions={}, yMax=null }) {
   const canvasRef = useRef(null);
   const chartRef  = useRef(null);
   useEffect(()=>{
     if (!canvasRef.current || !ratingData?.length) return;
     if (chartRef.current) chartRef.current.destroy();
     const labels = ratingData.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node].toFixed(1)+' ft':`N${p.node}`);
-    const limit   = ratingData.map(()=>1.0);
-    // Clip values to yMax so spikes don't appear at all — null means keep raw value
-    const clip = v => (v===null||v===undefined) ? null : (yMax!=null ? Math.min(v, yMax) : v);
-    const mpos    = ratingData.map(p=>clip(p.rfMpos));
-    const mneg    = ratingData.map(p=>clip(p.rfMneg));
-    const shear   = ratingData.map(p=>clip(p.rfV));
-    const govern  = ratingData.map(p=>clip(p.rfGov));
-    // Count values that were clipped (to show in tooltip)
+    const limit  = ratingData.map(()=>1.0);
+    const clip   = v => (v===null||v===undefined) ? null : (yMax!=null ? Math.min(v, yMax) : v);
+    // Inventory series
+    const govern = ratingData.map(p=>clip(p.rfGov));
+    const mpos   = ratingData.map(p=>clip(p.rfMpos));
+    const mneg   = ratingData.map(p=>clip(p.rfMneg));
+    const shear  = ratingData.map(p=>clip(p.rfV));
+    // Operating series (align by node)
+    const opMap  = {};
+    operatingData.forEach(p=>{ opMap[p.node]=p; });
+    const opGovern = ratingData.map(p=>clip(opMap[p.node]?.rfGov ?? null));
+    const hasOp    = operatingData.length > 0;
+
     const nClipped = yMax!=null ? ratingData.filter(p=>[p.rfMpos,p.rfMneg,p.rfV,p.rfGov].some(v=>v!=null&&v>yMax)).length : 0;
+
     chartRef.current = new Chart(canvasRef.current, {
       type:'line',
       data:{ labels, datasets:[
-        {label:'RF Governing', data:govern,  borderColor:'#1d4ed8', borderWidth:2.5, pointRadius:0, fill:false, tension:0},
-        {label:'RF M⁺',        data:mpos,    borderColor:'#059669', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
-        {label:'RF M⁻',        data:mneg,    borderColor:'#7c3aed', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
-        {label:'RF Shear',     data:shear,   borderColor:'#dc2626', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
-        {label:'RF = 1.0',     data:limit,   borderColor:'#f59e0b', borderWidth:2,   pointRadius:0, borderDash:[6,3], fill:false, tension:0},
+        // Inventory
+        {label:'RF Gov (Inv)', data:govern, borderColor:'#1d4ed8', borderWidth:2.5, pointRadius:0, fill:false, tension:0},
+        {label:'RF M⁺',        data:mpos,   borderColor:'#059669', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
+        {label:'RF M⁻',        data:mneg,   borderColor:'#7c3aed', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
+        {label:'RF Shear',     data:shear,  borderColor:'#dc2626', borderWidth:1.5, pointRadius:0, borderDash:[4,2], fill:false, tension:0},
+        // Operating
+        ...(hasOp ? [{label:'RF Gov (Op)', data:opGovern, borderColor:'#0891b2', borderWidth:2,
+          borderDash:[8,3], pointRadius:0, fill:false, tension:0}] : []),
+        // RF=1 line
+        {label:'RF = 1.0', data:limit, borderColor:'#f59e0b', borderWidth:2, pointRadius:0, borderDash:[6,3], fill:false, tension:0},
       ]},
       options:{
         responsive:true, maintainAspectRatio:false,
@@ -2155,21 +2508,21 @@ function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
             title:items=>{
               const p=ratingData[items[0]?.dataIndex];
               if (!p) return '';
-              const raw = [p.rfMpos,p.rfMneg,p.rfV,p.rfGov];
-              const anyClipped = yMax!=null && raw.some(v=>v!=null&&v>yMax);
-              return `Node ${p.node} · ${p.pos.toFixed(2)} ft${anyClipped?' (values clipped to '+yMax+')':''}`;
+              const anyClipped = yMax!=null && [p.rfMpos,p.rfMneg,p.rfV,p.rfGov].some(v=>v!=null&&v>yMax);
+              return `Node ${p.node} · ${p.pos.toFixed(2)} ft${anyClipped?' (clipped)':''}`;
             },
             label:ctx=>{
               const v=ctx.parsed.y;
               if (v===null) return null;
               const p=ratingData[ctx.dataIndex];
-              // Show raw value if clipped
-              const rawMap={'RF M⁺':p?.rfMpos,'RF M⁻':p?.rfMneg,'RF Shear':p?.rfV,'RF Governing':p?.rfGov};
+              const opP = opMap[p?.node];
+              const rawMap={
+                'RF Gov (Inv)':p?.rfGov,'RF M⁺':p?.rfMpos,'RF M⁻':p?.rfMneg,
+                'RF Shear':p?.rfV,'RF Gov (Op)':opP?.rfGov
+              };
               const raw=rawMap[ctx.dataset.label];
               const isClipped=yMax!=null&&raw!=null&&raw>yMax;
-              return isClipped
-                ? `${ctx.dataset.label}: ${raw.toFixed(3)} (clipped to ${yMax})`
-                : `${ctx.dataset.label}: ${v?.toFixed(3)}`;
+              return isClipped ? `${ctx.dataset.label}: ${raw.toFixed(3)} (clipped)` : `${ctx.dataset.label}: ${v?.toFixed(3)}`;
             },
           }}
         },
@@ -2184,7 +2537,7 @@ function RatingChart({ ratingData, nodePositions={}, yMax=null }) {
       }
     });
     return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
-  },[ratingData, yMax]);
+  },[ratingData, operatingData, yMax]);
   return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
 }
 
@@ -2290,6 +2643,13 @@ const VEHICLE_TONS = {
   'Type EV2':54,'Type EV3':73.5,
   'RI Operating load OP1':40,'RI Operating load OP2':40,'RI Operating load OP3':40,
   'RI Permit load BP1':45,'RI Permit load BP2':50,'RI Permit load BP3':55,'RI Permit load BP4':60,
+  // Railroad / AREMA — GVW in tons (kips÷2) from image rating reference
+  'AREMA-E80':40,       // 80 kips ref
+  'F40PH-280K':140,     // 280 kips ref
+  'HSP-46-296K':148,    // 296 kips ref
+  '286K-RailCar':143,   // 286 kips ref
+  '315K-CSX':157.5,     // 315 kips ref
+  'ES44AC-432K':216,    // 432 kips ref
 };
 // LRFR load factors — MBE Table 6A.4.2.2-1
 const LRFR_FACTORS = {
@@ -2350,6 +2710,57 @@ const FATIGUE_GAMMA = { 'I':1.5, 'II':0.75 };
 // Legal LL factors by ADTT — MBE Table 6A.4.4.2.3a-1
 // ── PS Concrete capacity helpers ─────────────────────────────────────────────
 // γ_p factor based on fpy/fpu ratio — AASHTO 5.6.3.1.1
+// ── Composite Steel Section Mn helpers ───────────────────────────────────────
+// AASHTO 6.10.7.1.2 — plastic moment of composite section (PNA method)
+// Inputs (all from zone): Fy, Fyr (rebar), fc, b_eff, ts, th (haunch), Zx, tw, d, tf
+// Returns { MnPos, MnNeg, PNA, Ybar, a }
+
+// Modular ratio n from fc (AASHTO Table 6.10.1.1.1b-1)
+function compN(fc) {
+  if (fc <= 4)  return 8;
+  if (fc <= 6)  return 7;
+  if (fc <= 8)  return 6;
+  if (fc <= 10) return 5;
+  return 4; // fc > 10 ksi
+}
+
+// Compute composite plastic moment Mnc (ft-kips) for positive moment
+// Using the plastic neutral axis (PNA) iterative method
+function computeCompositeMnPos(z) {
+  const { Fy=50, fc=4, bEff=96, ts=8, th=0,
+          ZxPos=0, d=21, tw=0.4,
+          Asr=0, Fyr=60, dsr=0 } = z;
+  if (!bEff || !ts || !Fy) return 0;
+
+  // Steel plastic force — use ZxPos (Fy·Zx = Mp) if no explicit area given
+  const Ps   = z.As_steel > 0 ? z.As_steel * Fy : (ZxPos > 0 ? Fy*ZxPos/12*12 : d*tw*Fy);
+  const Pc   = bEff * ts * 0.85 * fc;   // concrete compression force capacity
+  const Pr   = Asr * Fyr;               // rebar force
+
+  if (Ps + Pr <= Pc) {
+    // PNA in deck — full composite
+    const a  = (Ps + Pr) / (0.85 * fc * bEff);
+    const ds = d + th + ts - a/2;       // steel centroid to stress block midpoint
+    const Mn = (Ps * (ds - a/2) + Pr * Math.abs((dsr||ts/2) - a/2)) / 12;
+    return Math.max(0, +Mn.toFixed(1));
+  }
+  // PNA in steel — partial composite
+  const a    = Math.min(ts, Pc / (0.85 * fc * bEff));
+  const deckArm = d/2 + th + ts - a/2; // in
+  const MpSt = ZxPos > 0 ? Fy * ZxPos / 12 : 0;
+  const MnDk = Pc * deckArm / 12;
+  return Math.max(0, +(MpSt + MnDk).toFixed(1));
+}
+
+// Negative moment: composite section uses steel + rebar only (deck in tension, ignored)
+function computeCompositeMnNeg(z) {
+  const { Fy=50, Zx=0, Asr=0, Fyr=60, dsr=0, d=21 } = z;
+  const MpSteel = Fy * Zx / 12; // ft-kips
+  // Add rebar contribution if continuous
+  const MpRebar = Asr > 0 ? Fyr * Asr * Math.abs(dsr - d/2) / 12 : 0;
+  return MpSteel + MpRebar;
+}
+
 function psGammaP(fpu, fpy) {
   const r = fpy / fpu;
   if (r >= 0.9)  return 0.28;
@@ -2757,16 +3168,24 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
         MnPos: z.ZxPos>0 ? z.Fy*z.ZxPos/12 : z.MnPos,
         MnNeg: z.ZxNeg>0 ? z.Fy*z.ZxNeg/12 : z.MnNeg,
         Vn:    z.Aw>0    ? 0.6*z.Fy*z.Aw   : z.Vn,
+        SxPos: z.SxPos||0, SxNeg: z.SxNeg||0,
       };
     }
-    if (z.type==='psconc') {
-      const MnPos = z.Aps>0&&z.dp>0 ? computePSMn(z) : (z.MnPos||0);
-      const Vn    = z.dv>0          ? computePSVn(z)  : (z.Vn||0);
-      return { MnPos, MnNeg: MnPos*0.7, Vn,  // MnNeg approx for PS (often not critical)
-               SbPos: z.Sb||0, StPos: z.St||0, fpe: z.fpe||0, fc: z.fc||5,
-               _zone: z }; // carry zone for Service III
+    if (z.type==='composite') {
+      const MnPos = computeCompositeMnPos(z);
+      const MnNeg = z.useCompNeg ? computeCompositeMnNeg(z) : (z.ZxNeg>0 ? z.Fy*z.ZxNeg/12 : z.MnNeg||0);
+      const Vn    = z.Aw>0 ? 0.6*z.Fy*z.Aw : z.Vn||0;
+      return { MnPos, MnNeg, Vn, SxPos: z.SxPos||0, SxNeg: z.SxNeg||0, _zone:z };
     }
-    return {MnPos:z.MnPos||0, MnNeg:z.MnNeg||0, Vn:z.Vn||0};
+    if (z.type==='psconc') {
+      const MnPos = computePSMn(z);
+      const Vn    = z.dv>0 ? computePSVn(z) : (z.Vn||0);
+      return { MnPos, MnNeg: z.MnNeg||MnPos*0.7, Vn,
+               SbPos: z.Sb||0, StPos: z.St||0, fpe: z.fpe||0, fc: z.fc||5,
+               _zone: z };
+    }
+    return { MnPos:z.MnPos||0, MnNeg:z.MnNeg||0, Vn:z.Vn||0,
+             SxPos: z.SxPos||0, SxNeg: z.SxNeg||0 };
   };
   // Rating sub-tab and D/C chart state — must be at component level (Rules of Hooks)
   const [ratingSubTab, setRatingSubTab] = useState('inputs');
@@ -3681,12 +4100,14 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
             <div style={{display:'flex',gap:'2px',marginBottom:'14px',background:'#f3f4f6',borderRadius:'7px',padding:'3px'}}>
               {[
                 {id:'inputs',   label:'⚙ Inputs & Setup'},
-                {id:'table',    label:'📋 Multi-Vehicle Table', locked:!hasData},
-                {id:'dc',       label:'📊 Demand vs. Capacity', locked:!hasData},
-                {id:'serviceII',label:'🔧 Service II (Steel)',   locked:!hasData},
-                {id:'fatigue',  label:'💀 Fatigue',              locked:!hasData},
-                {id:'ps3',      label:'🟦 PS Service III',       locked:!hasData},
-                {id:'card',     label:'🗒 Report Card',          locked:!hasData},
+                {id:'summary',  label:'📋 Summary',              locked:!hasData},
+                {id:'table',    label:'🚛 Multi-Vehicle',         locked:!hasData},
+                {id:'dc',       label:'📊 Demand vs. Cap',        locked:!hasData},
+                {id:'serviceII',label:'🔧 Service II',            locked:!hasData},
+                {id:'fatigue',  label:'💀 Fatigue',               locked:!hasData},
+                {id:'ps1',      label:'🟦 PS Strength I',         locked:!hasData},
+                {id:'ps3',      label:'🟪 PS Service III',        locked:!hasData},
+                {id:'card',     label:'🗒 Report Card',           locked:!hasData},
               ].map(t=>(
                 <button key={t.id} onClick={()=>!t.locked&&setRatingSubTab(t.id)}
                   disabled={t.locked}
@@ -4115,7 +4536,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     </div>
                     {/* Type toggle */}
                     <div style={{display:'flex',borderRadius:'5px',overflow:'hidden',border:'1px solid #e5e7eb'}}>
-                      {[['manual','Manual'],['quickcalc','Steel Calc'],['psconc','PS Conc']].map(([t,lbl])=>(
+                      {[['manual','Manual'],['quickcalc','Steel Calc'],['composite','Composite'],['psconc','PS Conc']].map(([t,lbl])=>(
                         <button key={t} onClick={()=>updateCapZone(z.id,'type',t)} style={{
                           padding:'4px 10px',border:'none',cursor:'pointer',fontSize:'11px',
                           background:z.type===t?col:'#fff',color:z.type===t?'#fff':'#6b7280',fontWeight:z.type===t?'600':'400'}}>
@@ -4194,6 +4615,116 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                       </div>
                     </div>
                   )}
+
+                  {/* Composite Steel Inputs */}
+                  {z.type==='composite'&&(<div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
+                    <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#1d4ed8',
+                      padding:'4px 8px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                      AASHTO 6.10.7.1.2 — composite plastic moment (PNA method) · Mn computed from transformed section
+                    </div>
+
+                    {/* Row 1: Steel section */}
+                    <div style={{padding:'7px 10px',background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:'4px'}}>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#374151',fontWeight:'600',marginBottom:'5px'}}>Steel Section</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:'5px'}}>
+                        {[["Fy (ksi)",'Fy',50],["Zx⁺ (in³)",'ZxPos',0],["Zx⁻ (in³)",'ZxNeg',0],
+                          ["d (in)",'d',21],["tw (in)",'tw',0.4],["Aw (in²)",'Aw',0]
+                        ].map(([lbl,field,def])=>(
+                          <div key={field}>
+                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                              value={z[field]||''} placeholder={String(def)}
+                              onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop:'4px',fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                        Zx⁻ = plastic section modulus of steel for negative moment zones
+                      </div>
+                    </div>
+
+                    {/* Row 2: Deck */}
+                    <div style={{padding:'7px 10px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#1d4ed8',fontWeight:'600',marginBottom:'5px'}}>Deck</div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'5px'}}>
+                        {[["f'c (ksi)",'fc',4,0.5],["beff (in)",'bEff',96,1],
+                          ["ts (in)",'ts',8,0.25],["Haunch th (in)",'th',0,0.25]
+                        ].map(([lbl,field,def,step])=>(
+                          <div key={field}>
+                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                              value={z[field]||''} placeholder={String(def)}
+                              onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{marginTop:'4px',fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af'}}>
+                        n = {compN(z.fc||4)} (AASHTO Table 6.10.1.1.1b-1) · Pc = 0.85·f'c·beff·ts = {(0.85*(z.fc||4)*(z.bEff||96)*(z.ts||8)).toFixed(0)} kips
+                      </div>
+                    </div>
+
+                    {/* Row 3: Longitudinal rebar (neg. moment) */}
+                    <div style={{padding:'7px 10px',background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:'4px'}}>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#374151',fontWeight:'600',marginBottom:'5px'}}>
+                        Longitudinal Rebar (negative moment zones)
+                      </div>
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:'5px',alignItems:'end'}}>
+                        {[["Asr (in²)",'Asr',0,0.01],["Fyr (ksi)",'Fyr',60,1],
+                          ["dsr (in from top)",'dsr',0,0.5]
+                        ].map(([lbl,field,def,step])=>(
+                          <div key={field}>
+                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
+                              value={z[field]||''} placeholder={String(def)}
+                              onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                          </div>
+                        ))}
+                        <div>
+                          <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>Use composite Mn⁻</div>
+                          <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
+                            <input type="checkbox" checked={!!z.useCompNeg}
+                              onChange={e=>updateCapZone(z.id,'useCompNeg',e.target.checked)}
+                              style={{accentColor:'#1d4ed8'}}/>
+                            <span style={{fontSize:'11px',fontFamily:'monospace',color:'#374151'}}>Yes</span>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Row 4: Sx for Service II */}
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'6px',
+                      padding:'7px 10px',background:'#f0f9ff',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#1d4ed8',gridColumn:'1/-1',marginBottom:'3px',fontWeight:'600'}}>
+                        Elastic Section Modulus — Service II stress checks
+                      </div>
+                      {[['Sx⁺ (in³) bottom flange','SxPos'],['Sx⁻ (in³) top flange','SxNeg']].map(([lbl,field])=>(
+                        <div key={field}>
+                          <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                          <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}
+                            value={z[field]||''} onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Live preview */}
+                    {(()=>{
+                      const MnPos = computeCompositeMnPos(z);
+                      const MnNeg = z.useCompNeg ? computeCompositeMnNeg(z) : (z.ZxNeg>0?z.Fy*z.ZxNeg/12:z.MnNeg||0);
+                      const Vn    = z.Aw>0 ? 0.6*(z.Fy||50)*z.Aw : (z.Vn||0);
+                      const Ps    = z.As_steel>0 ? z.As_steel*(z.Fy||50) : ((z.ZxPos||0)>0 ? (z.Fy||50)*(z.ZxPos)/12*12 : (z.d||21)*(z.tw||0.4)*(z.Fy||50));
+                      const Pc    = (z.bEff||96)*(z.ts||8)*0.85*(z.fc||4);
+                      const pnaInDeck = Ps <= Pc;
+                      return (
+                        <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#1e40af',
+                          padding:'5px 8px',background:'#dbeafe',border:'1px solid #bfdbfe',borderRadius:'4px'}}>
+                          PNA: {pnaInDeck?'in deck (full composite)':'in steel (partial composite)'} &nbsp;·&nbsp;
+                          Mn⁺ = {MnPos.toFixed(1)} ft·k &nbsp;·&nbsp; Mn⁻ = {MnNeg.toFixed(1)} ft·k &nbsp;·&nbsp; Vn = {Vn.toFixed(1)} kips
+                          <br/>
+                          <span style={{color:'#9ca3af'}}>φMn⁺ = {(phiC*phiS*ratingPhiF*MnPos).toFixed(1)} &nbsp; φVn = {(phiC*phiS*ratingPhiV*Vn).toFixed(1)}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>)}
 
                   {/* PS Concrete Inputs */}
                   {z.type==='psconc'&&(<div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
@@ -4437,7 +4968,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
             </div>
 
             <div data-chartid="rating-chart" style={{height:'280px'}}>
-              <RatingChart ratingData={ratingData} nodePositions={nodePositions} yMax={rfYMax}/>
+              <RatingChart ratingData={ratingData} operatingData={operatingData} nodePositions={nodePositions} yMax={rfYMax}/>
             </div>
           </div>
 
@@ -4650,6 +5181,220 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
           </div>
         </div>)}
       </div>)}
+
+            {/* ════ SUB-TAB: SUMMARY ════ */}
+            {ratingSubTab==='summary'&&(<div>
+              {/* ── Limit State Summary Table ── */}
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',
+                overflow:'hidden',marginBottom:'14px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:'10px',padding:'10px 16px',
+                  background:'#f9fafb',borderBottom:'1px solid #e5e7eb'}}>
+                  <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>
+                    Load Rating Summary — All Limit States
+                  </span>
+                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    {ratingMethod} · {ratingLimitState} · {cfg?.projectName||''}
+                  </span>
+                  <button onClick={()=>{
+                    const rows = [
+                      ['Limit State','Level','RF (Gov)','Rating Tons','Controls','Node','Pos (ft)','Status'],
+                      ['Strength I', 'Inventory', govRating?.rfGov?.toFixed(3)||'—',
+                        govRating?(govRating.rfGov*ratingVehicleTon).toFixed(1)+'T':'—',
+                        govRating?.governs||'—', govRating?.node||'—', govRating?.pos?.toFixed(2)||'—',
+                        govRating?.rfGov>=1?'OK':'FAIL'],
+                      ['Strength I', 'Operating', govOperating?.rfGov?.toFixed(3)||'—',
+                        govOperating?(govOperating.rfGov*ratingVehicleTon).toFixed(1)+'T':'—',
+                        govOperating?.governs||'—', govOperating?.node||'—', govOperating?.pos?.toFixed(2)||'—',
+                        govOperating?.rfGov>=1?'OK':'FAIL'],
+                      ...(govServiceII?[['Service II','—',govServiceII.rfGov.toFixed(3),'—',
+                        govServiceII.governs,govServiceII.node,govServiceII.pos.toFixed(2),
+                        govServiceII.rfGov>=1?'OK':'FAIL']]:[]),
+                      ...(govFatigue?[['Fatigue','—',govFatigue.rfGov.toFixed(3),'—',
+                        govFatigue.governs,govFatigue.node,govFatigue.pos.toFixed(2),
+                        govFatigue.rfGov>=1?'OK':'FAIL']]:[]),
+                      ...(govPS3?[['PS Service III','—',govPS3.rfGov.toFixed(3),'—',
+                        govPS3.governs,govPS3.node,govPS3.pos.toFixed(2),
+                        govPS3.rfGov>=1?'OK':'FAIL']]:[]),
+                    ];
+                    const csv=rows.map(r=>r.join(',')).join('\n');
+                    const a=document.createElement('a');
+                    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+                    a.download='rating_summary.csv';a.click();
+                  }} style={{marginLeft:'auto',background:'#f9fafb',border:'1px solid #e5e7eb',
+                    borderRadius:'4px',padding:'3px 9px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>
+                  ↓ CSV</button>
+                </div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',fontFamily:'monospace'}}>
+                    <thead>
+                      <tr style={{background:'#f9fafb'}}>
+                        {['Limit State','Level','γ_LL','RF (Gov)','Rating Tons',
+                          'Controls','Node','Pos (ft)','Status'].map(h=>(
+                          <th key={h} style={{padding:'8px 12px',textAlign:'left',fontWeight:'500',
+                            color:'#6b7280',fontSize:'10px',borderBottom:'2px solid #e5e7eb',
+                            whiteSpace:'nowrap'}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        {ls:'Strength I', level:'Inventory', gam:gamLL,
+                         gov:govRating, hasTons:true},
+                        {ls:'Strength I', level:'Operating', gam:gamLL_op,
+                         gov:govOperating, hasTons:true},
+                        ...(serviceIIData.length?[{ls:'Service II (Steel)',level:'—',gam:1.3,
+                          gov:govServiceII,hasTons:false}]:[]),
+                        ...(fatigueData.length&&govFatigue?[
+                          {ls:'Fatigue I',  level:'Infinite Life', gam:1.5,
+                           gov:{...govFatigue, rfGov:govFatigue.rfI??null},  hasTons:false},
+                          {ls:'Fatigue II', level:'Finite Life',   gam:0.75,
+                           gov:{...govFatigue, rfGov:govFatigue.rfII??null}, hasTons:false},
+                        ]:[]),
+                        ...(psServiceIIIData.length&&govPS3?[{ls:'PS Service III',level:'Service',
+                          gam:ps3GamLL, gov:govPS3, hasTons:false}]:[]),
+                      ].map(({ls,level,gam,gov,hasTons},i)=>{
+                        const rf   = gov?.rfGov ?? null;
+                        const ok   = rf!=null && rf>=1;
+                        const col  = rf==null?'#9ca3af':ok?'#059669':rf>=0.5?'#d97706':'#dc2626';
+                        const bg   = i%2===0?'#fff':'#fafafa';
+                        const tons = hasTons&&rf!=null ? +(rf*ratingVehicleTon).toFixed(1) : null;
+                        return (
+                          <tr key={ls+level} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                            <td style={{padding:'10px 12px',fontWeight:'600',color:'#111827'}}>{ls}</td>
+                            <td style={{padding:'10px 12px',color:'#6b7280'}}>{level}</td>
+                            <td style={{padding:'10px 12px',fontFamily:'monospace',color:'#374151'}}>{gam?.toFixed(2)}</td>
+                            <td style={{padding:'10px 12px',fontSize:'16px',fontWeight:'800',
+                              fontFamily:'monospace',color:col}}>
+                              {rf!=null?rf.toFixed(3):'—'}
+                            </td>
+                            <td style={{padding:'10px 12px',fontWeight:'600',color:col}}>
+                              {tons!=null?`${tons} T`:'—'}
+                            </td>
+                            <td style={{padding:'10px 12px',color:'#374151'}}>
+                              {gov?.governs==='M+'?'M⁺ Flex':gov?.governs==='M-'?'M⁻ Flex':
+                               gov?.governs==='V'?'Shear':gov?.governs||'—'}
+                            </td>
+                            <td style={{padding:'10px 12px',color:'#6b7280'}}>
+                              {gov?.node!=null?`N${gov.node}`:'—'}
+                            </td>
+                            <td style={{padding:'10px 12px',color:'#6b7280'}}>
+                              {gov?.pos!=null?`${gov.pos.toFixed(2)} ft`:'—'}
+                            </td>
+                            <td style={{padding:'10px 12px'}}>
+                              {rf!=null?(
+                                <span style={{fontSize:'10px',fontWeight:'700',color:col,
+                                  background:'#fff',padding:'3px 10px',borderRadius:'99px',
+                                  border:`1px solid ${col}40`,whiteSpace:'nowrap'}}>
+                                  {ok?'✓ OK':rf>=0.5?'⚠ Low':'❌ FAIL'}
+                                </span>
+                              ):(
+                                <span style={{fontSize:'10px',color:'#d1d5db',fontFamily:'monospace'}}>
+                                  not computed
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Governing across all limit states */}
+                {(()=>{
+                  const allRFs = [
+                    govRating?.rfGov, govOperating?.rfGov,
+                    govServiceII?.rfGov, govFatigue?.rfGov, govPS3?.rfGov,
+                  ].filter(v=>v!=null);
+                  if (!allRFs.length) return null;
+                  const minRF = Math.min(...allRFs);
+                  const govColor = minRF>=1?'#059669':minRF>=0.5?'#d97706':'#dc2626';
+                  const govBg    = minRF>=1?'#d1fae5':minRF>=0.5?'#fef3c7':'#fee2e2';
+                  return (
+                    <div style={{padding:'10px 16px',background:govBg,borderTop:`2px solid ${govColor}`,
+                      display:'flex',alignItems:'center',gap:'14px',flexWrap:'wrap'}}>
+                      <span style={{fontSize:'12px',fontWeight:'700',color:govColor}}>
+                        {minRF>=1?'✅ ADEQUATE — No Posting Required':'❌ POSTING REQUIRED'}
+                      </span>
+                      <span style={{fontSize:'13px',fontWeight:'800',fontFamily:'monospace',color:govColor}}>
+                        Governing RF = {minRF.toFixed(3)}
+                      </span>
+                      {minRF<1&&ratingVehicleTon>0&&(
+                        <span style={{fontSize:'12px',fontFamily:'monospace',color:govColor}}>
+                          · Max safe load ≈ {(minRF*ratingVehicleTon).toFixed(1)} T
+                        </span>
+                      )}
+                      <span style={{fontSize:'10px',fontFamily:'monospace',color:'#6b7280',marginLeft:'auto'}}>
+                        {ratingMethod} · {ratingLimitState} · {cfg?.projectName||''}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* ── RF Diagram (Inv + Op overlay) ── same as Inputs tab but compact ── */}
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',
+                padding:'12px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'12px',fontWeight:'600',color:'#111827',marginBottom:'6px',
+                  display:'flex',alignItems:'center',gap:'10px'}}>
+                  <span>Strength I RF Along Beam</span>
+                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    Solid = Inventory (γ_LL={gamLL}) · Dashed cyan = Operating (γ_LL={gamLL_op.toFixed(2)})
+                  </span>
+                </div>
+                <div style={{height:'220px'}}>
+                  <RatingChart ratingData={ratingData} operatingData={operatingData}
+                    nodePositions={nodePositions} yMax={rfYMax}/>
+                </div>
+              </div>
+
+              {/* ── Critical Locations top 5 ── */}
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
+                <div style={{padding:'8px 14px',background:'#f9fafb',borderBottom:'1px solid #e5e7eb',
+                  fontSize:'11.5px',fontWeight:'600',color:'#374151'}}>
+                  Top 5 Critical Locations (Strength I Inventory)
+                </div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                    <thead>
+                      <tr style={{background:'#f9fafb'}}>
+                        {['Node','Pos (ft)','φMn⁺','φVn','RF M⁺','RF V','RF Gov (Inv)','RF Gov (Op)','Controls','Status'].map(h=>(
+                          <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',
+                            color:'#6b7280',fontSize:'9.5px',borderBottom:'1px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...ratingData].sort((a,b)=>a.rfGov-b.rfGov).slice(0,5).map(p=>{
+                        const opP = operatingData.find(o=>o.node===p.node);
+                        const col = p.rfGov>=1?'#059669':p.rfGov>=0.3?'#d97706':'#dc2626';
+                        const bg  = p.rfGov>=1?'#f0fdf4':p.rfGov>=0.3?'#fffbeb':'#fef2f2';
+                        return (
+                          <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                            <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
+                            <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                            <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.CmnPos}</td>
+                            <td style={{padding:'5px 8px',color:'#dc2626'}}>{p.Cvn}</td>
+                            <td style={{padding:'5px 8px',color:p.rfMpos>=1?'#059669':'#dc2626'}}>{p.rfMpos?.toFixed(3)??'—'}</td>
+                            <td style={{padding:'5px 8px',color:p.rfV>=1?'#059669':'#dc2626'}}>{p.rfV?.toFixed(3)??'—'}</td>
+                            <td style={{padding:'5px 8px',fontWeight:'700',color:col}}>{p.rfGov.toFixed(3)}</td>
+                            <td style={{padding:'5px 8px',color:opP?.rfGov>=1?'#059669':'#0891b2',fontStyle:'italic'}}>
+                              {opP?.rfGov?.toFixed(3)??'—'}
+                            </td>
+                            <td style={{padding:'5px 8px',color:'#374151'}}>{p.governs==='M+'?'M⁺':p.governs==='M-'?'M⁻':'V'}</td>
+                            <td style={{padding:'5px 8px'}}>
+                              <span style={{fontSize:'9px',fontWeight:'700',color:col,background:'#fff',
+                                padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                                {p.rfGov>=1?'✓ OK':'❌'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>)}
 
             {/* ════ SUB-TAB: MULTI-VEHICLE TABLE ════ */}
             {ratingSubTab==='table'&&(<div>
@@ -5299,6 +6044,168 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>
                     Fatigue I γ=1.5 · Fatigue II γ=0.75 · N={((()=>{const p_=FATIGUE_P[Math.min(fatigueLanes,3)]??0.80;return(365*75*fatigueCyclesN*fatigueAdtt*p_).toExponential(2)})())} cycles · ADTT_SL={+(fatigueAdtt*(FATIGUE_P[Math.min(fatigueLanes,3)]??0.80)).toFixed(0)}
                   </div>
+                </>)}
+              </div>
+            </div>)}
+
+            {/* ════ SUB-TAB: PS STRENGTH I ════ */}
+            {ratingSubTab==='ps1'&&(<div>
+              <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px'}}>
+                <div style={{fontSize:'13px',fontWeight:'600',color:'#111827',marginBottom:'4px'}}>
+                  PS Concrete — Strength I Flexure &amp; Shear
+                </div>
+                <div style={{fontSize:'11px',fontFamily:'monospace',color:'#6b7280',marginBottom:'12px',
+                  padding:'7px 10px',background:'#eff6ff',border:'1px solid #bfdbfe',borderRadius:'5px'}}>
+                  AASHTO 5.6.3 Flexure · 5.7.3 Shear · RF = (φR_n − γ_DC·DC − γ_DW·DW) / (γ_LL·LL·scale)
+                  &nbsp;·&nbsp; Capacity computed from PS zone section properties
+                </div>
+
+                {!capZones.some(z=>z.type==='psconc')&&(
+                  <div style={{padding:'10px 14px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'6px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    ⚠ No PS Concrete capacity zones defined. Go to Inputs → Capacity Zones → select "PS Conc".
+                  </div>
+                )}
+
+                {capZones.some(z=>z.type==='psconc')&&(<>
+                  {/* Per-zone capacity preview */}
+                  <div style={{marginBottom:'16px'}}>
+                    <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>
+                      Section Capacity by Zone
+                    </div>
+                    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'8px'}}>
+                      {capZones.filter(z=>z.type==='psconc').map((z,i)=>{
+                        const {fps,a,c} = computePSfps(z);
+                        const Mn  = computePSMn(z);
+                        const Vn  = computePSVn(z);
+                        const phi_Mn = phiC*phiS*ratingPhiF*Mn;
+                        const phi_Vn = phiC*phiS*ratingPhiV*Vn;
+                        const colors=['#1d4ed8','#059669','#7c3aed','#dc2626','#ea580c'];
+                        const col = colors[i%colors.length];
+                        return (
+                          <div key={z.id} style={{border:`1px solid ${col}30`,borderLeft:`3px solid ${col}`,
+                            borderRadius:'6px',padding:'10px 12px',background:'#fafafa'}}>
+                            <div style={{fontSize:'10.5px',fontWeight:'700',color:col,marginBottom:'6px'}}>
+                              Zone {i+1} · {z.startX}–{z.endX} ft
+                            </div>
+                            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px',
+                              fontSize:'10px',fontFamily:'monospace'}}>
+                              {[['Aps','Aps',z.Aps,'in²'],['fpu','fpu',z.fpu,'ksi'],
+                                ['fpe','fpe',z.fpe,'ksi'],["f'c","fc",z.fc,'ksi'],
+                                ['dp','dp',z.dp,'in'],["β₁",'β₁',psBeta1(z.fc||5).toFixed(3),''],
+                              ].map(([label,,val,unit])=>(
+                                <div key={label} style={{display:'flex',justifyContent:'space-between',
+                                  padding:'2px 0',borderBottom:'1px solid #f3f4f6'}}>
+                                  <span style={{color:'#9ca3af'}}>{label}</span>
+                                  <span style={{fontWeight:'600',color:'#374151'}}>{val||'—'} {unit}</span>
+                                </div>
+                              ))}
+                            </div>
+                            <div style={{marginTop:'6px',padding:'5px 8px',background:'#eff6ff',
+                              border:'1px solid #bfdbfe',borderRadius:'4px',fontSize:'10px',fontFamily:'monospace',color:'#1d4ed8'}}>
+                              fps = {fps.toFixed(2)} ksi &nbsp;·&nbsp; a = {a.toFixed(3)} in &nbsp;·&nbsp; c = {c.toFixed(3)} in
+                            </div>
+                            <div style={{marginTop:'4px',padding:'5px 8px',background:'#f0fdf4',
+                              border:'1px solid #bbf7d0',borderRadius:'4px',fontSize:'10px',fontFamily:'monospace',color:'#166534'}}>
+                              Mn = {Mn.toFixed(1)} ft·k &nbsp;→&nbsp; <strong>φMn = {phi_Mn.toFixed(1)} ft·k</strong>
+                              <br/>Vn = {Vn.toFixed(1)} kips &nbsp;→&nbsp; <strong>φVn = {phi_Vn.toFixed(1)} kips</strong>
+                            </div>
+                            {/* Ductility check Dp ≤ 0.42·Dt */}
+                            {(()=>{
+                              const Dt  = z.d || 0;
+                              const Dp  = c;
+                              const ok  = Dt > 0 ? Dp <= 0.42*Dt : true;
+                              return Dt>0 ? (
+                                <div style={{marginTop:'4px',fontSize:'9.5px',fontFamily:'monospace',
+                                  color:ok?'#059669':'#dc2626',padding:'3px 6px',
+                                  background:ok?'#f0fdf4':'#fef2f2',borderRadius:'4px',
+                                  border:`1px solid ${ok?'#bbf7d0':'#fca5a5'}`}}>
+                                  Ductility: Dp={Dp.toFixed(3)} in · 0.42·Dt={+(0.42*Dt).toFixed(3)} in ·{' '}
+                                  {ok?'✓ OK':'❌ FAIL — reduce Aps or check geometry'}
+                                </div>
+                              ) : null;
+                            })()}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Per-node rating results for PS nodes */}
+                  {ratingData.filter(p=>{
+                    const xPos = p.pos;
+                    const z = capZones.find(z=>xPos>=parseFloat(z.startX)-0.001&&xPos<parseFloat(z.endX)+0.001)
+                           || capZones[capZones.length-1];
+                    return z?.type==='psconc';
+                  }).length > 0 ? (<>
+                    <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>
+                      Node-by-Node Rating — PS Concrete Zones Only
+                    </div>
+                    <div style={{overflowX:'auto'}}>
+                      <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
+                        <thead>
+                          <tr style={{background:'#f9fafb'}}>
+                            {['Node','Pos (ft)','Zone','fps (ksi)','a (in)','φMn (ft·k)','φVn (kips)',
+                              'M_DC','M_LL','V_DC','V_LL','RF M⁺','RF V','RF Gov','Status'].map(h=>(
+                              <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',
+                                color:'#6b7280',fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ratingData.filter(p=>{
+                            const z = capZones.find(z=>p.pos>=parseFloat(z.startX)-0.001&&p.pos<parseFloat(z.endX)+0.001)||capZones[capZones.length-1];
+                            return z?.type==='psconc';
+                          }).map(p=>{
+                            const z = capZones.find(z=>p.pos>=parseFloat(z.startX)-0.001&&p.pos<parseFloat(z.endX)+0.001)||capZones[capZones.length-1];
+                            const {fps,a} = computePSfps(z||{});
+                            const col = p.rfGov>=1?'#059669':p.rfGov>=0.3?'#d97706':'#dc2626';
+                            const bg  = p.rfGov>=1?'#f0fdf4':p.rfGov>=0.3?'#fffbeb':'#fef2f2';
+                            const zIdx = capZones.indexOf(z)+1;
+                            return (
+                              <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
+                                <td style={{padding:'5px 8px',fontWeight:'600'}}>{p.node}</td>
+                                <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                                <td style={{padding:'5px 8px',color:'#7c3aed'}}>Z{zIdx}</td>
+                                <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{fps.toFixed(2)}</td>
+                                <td style={{padding:'5px 8px'}}>{a.toFixed(3)}</td>
+                                <td style={{padding:'5px 8px',color:'#059669',fontWeight:'600'}}>{p.CmnPos}</td>
+                                <td style={{padding:'5px 8px',color:'#dc2626',fontWeight:'600'}}>{p.Cvn}</td>
+                                <td style={{padding:'5px 8px'}}>{p.Mdc.toFixed(1)}</td>
+                                <td style={{padding:'5px 8px'}}>{p.Mllpos.toFixed(1)}</td>
+                                <td style={{padding:'5px 8px'}}>{p.Vdc.toFixed(1)}</td>
+                                <td style={{padding:'5px 8px'}}>{p.Vll.toFixed(1)}</td>
+                                <td style={{padding:'5px 8px',color:p.rfMpos>=1?'#059669':'#dc2626',fontWeight:'600'}}>
+                                  {p.rfMpos?.toFixed(3)??'—'}
+                                </td>
+                                <td style={{padding:'5px 8px',color:p.rfV>=1?'#059669':'#dc2626',fontWeight:'600'}}>
+                                  {p.rfV?.toFixed(3)??'—'}
+                                </td>
+                                <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
+                                <td style={{padding:'5px 8px'}}>
+                                  <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
+                                    padding:'1px 5px',borderRadius:'99px',border:`1px solid ${col}30`}}>
+                                    {p.rfGov>=1?'✓ OK':'❌ FAIL'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div style={{marginTop:'6px',fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',
+                      padding:'5px 10px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px'}}>
+                      γ_DC={gamDC} · γ_DW={gamDW} · γ_LL={gamLL} · LL scale ×{ratingLLScale.toFixed(4)}
+                      · φ_c={phiC} · φ_s={phiS} · φ_f={ratingPhiF} · φ_v={ratingPhiV}
+                      · AASHTO 5.6.3 / MBE 6A.5
+                    </div>
+                  </>) : (
+                    <div style={{padding:'20px',textAlign:'center',color:'#9ca3af',fontSize:'12px',
+                      background:'#f9fafb',borderRadius:'6px',border:'1px dashed #e5e7eb'}}>
+                      No rating results for PS Concrete nodes. Verify load cases are selected in Inputs tab.
+                    </div>
+                  )}
                 </>)}
               </div>
             </div>)}
@@ -7137,7 +8044,7 @@ function App() {
               borderRadius:'6px',color:step===0?'#d1d5db':'#374151',
               padding:'7px 18px',cursor:step===0?'default':'pointer',fontSize:'13px'}}>← Back</button>
             <div style={{display:'flex',gap:'5px',alignItems:'center'}}>
-              {STEPS.map((_,i)=>(<div key={i} onClick={()=>setStep(i)} style={{
+              {STEPS.map((_,i)=>(<div key={`step-${i}`} onClick={()=>setStep(i)} style={{
                 width:i===step?'22px':'6px',height:'6px',borderRadius:'3px',
                 background:i===step?'#1d4ed8':i<step?'#6ee7b7':'#e5e7eb',cursor:'pointer',transition:'all 0.2s'}}/>))}
             </div>
