@@ -13029,7 +13029,7 @@ function SavesModal({ cfg, onLoad, onClose,
         <div style={{padding:'12px 22px',borderTop:'1px solid #e5e7eb',background:'#f9fafb',
           display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
           <div style={{fontSize:'10.5px',fontFamily:'monospace',color:'#9ca3af'}}>
-            Saves store config + results in browser localStorage. Use ↓ Export for permanent JSON backup.
+            Saves store config + results in browser localStorage. Use ⬆ Export JSON for a complete backup (config + results). ⬇ Import JSON restores everything.
           </div>
           <button onClick={onClose} style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',
             color:'#374151',padding:'6px 16px',cursor:'pointer',fontSize:'12.5px'}}>Close</button>
@@ -13143,15 +13143,55 @@ function App() {
 
   const loadDefault=()=>{if(window.confirm('Reset all inputs to defaults?'))setCfg(DEFAULT_CFG);};
   const exportJSON=()=>{
-    const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+    // Bundle ALL state so the file is a complete save
+    const bundle={
+      _version: 3,
+      _exported: new Date().toISOString(),
+      _project: cfg.projectUser||'project',
+      cfg,
+      resultsRows:   resultsRows||[],
+      resultsCombos: resultsCombos||[],
+      ratingCapZones: ratingCapZones||[],
+      resultsCfgSnap: resultsCfgSnap||null,
+    };
+    const blob=new Blob([JSON.stringify(bundle,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);const a=document.createElement('a');
-    a.href=url;a.download=`${cfg.projectUser}_mct_config.json`;a.click();URL.revokeObjectURL(url);
+    a.href=url;
+    a.download=`${(cfg.projectUser||'project').replace(/\s+/g,'_')}_mct_config.json`;
+    a.click();URL.revokeObjectURL(url);
   };
   const importJSON=(e)=>{
     const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();reader.onload=ev=>{
-      try{const loaded=JSON.parse(ev.target.result);setCfg({...DEFAULT_CFG,...loaded});setSavedMsg('Loaded!');}
-      catch(err){alert('Invalid JSON file');}
+      try{
+        const loaded=JSON.parse(ev.target.result);
+        if(loaded._version&&loaded.cfg){
+          // ── New bundle format: restore everything ──
+          setCfg({...DEFAULT_CFG,...loaded.cfg});
+          if(loaded.resultsRows?.length){
+            setResultsRows(loaded.resultsRows);
+            try{localStorage.setItem('mct_results_v1',JSON.stringify(loaded.resultsRows));}catch(e){}
+            setResultsMode('view');
+          }
+          if(loaded.resultsCombos?.length){
+            setResultsCombos(loaded.resultsCombos);
+            try{localStorage.setItem('mct_results_combos_v1',JSON.stringify(loaded.resultsCombos));}catch(e){}
+          }
+          if(loaded.ratingCapZones?.length){
+            setRatingCapZones(loaded.ratingCapZones);
+            try{localStorage.setItem('mct_cap_zones_v1',JSON.stringify(loaded.ratingCapZones));}catch(e){}
+          }
+          if(loaded.resultsCfgSnap){
+            setResultsCfgSnap(loaded.resultsCfgSnap);
+            try{localStorage.setItem('mct_results_snap_v1',loaded.resultsCfgSnap);}catch(e){}
+          }
+        } else {
+          // ── Legacy cfg-only format ──
+          setCfg({...DEFAULT_CFG,...loaded});
+        }
+        setSavedMsg('Loaded!');
+      }
+      catch(err){alert('Invalid JSON file — '+err.message);}
     };reader.readAsText(file);
     e.target.value='';
   };
@@ -13338,11 +13378,14 @@ function App() {
                 fontSize:'9.5px',padding:'1px 5px',fontWeight:'700'}}>{loadSaves().length}</span>}
             </button>
             <div style={{display:'flex',gap:'4px'}}>
-              <button onClick={exportJSON} style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',
-                color:'#374151',padding:'5px 0',cursor:'pointer',fontSize:'11px',flex:1}}>⬆ Export</button>
-              <label style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',
-                color:'#374151',padding:'5px 0',cursor:'pointer',fontSize:'11px',flex:1,textAlign:'center',display:'block'}}>
-                ⬇ Import<input type="file" accept=".json" onChange={importJSON} style={{display:'none'}}/>
+              <button onClick={exportJSON} style={{background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:'5px',
+                color:'#1d4ed8',padding:'5px 0',cursor:'pointer',fontSize:'11px',flex:1,fontWeight:'600'}}
+                title="Save all config + results to a JSON file">⬆ Export JSON</button>
+              <label style={{background:'#dcfce7',border:'1px solid #86efac',borderRadius:'5px',
+                color:'#15803d',padding:'5px 0',cursor:'pointer',fontSize:'11px',flex:1,textAlign:'center',
+                display:'block',fontWeight:'600'}}
+                title="Load a previously exported JSON file — restores config and results">
+                ⬇ Import JSON<input type="file" accept=".json" onChange={importJSON} style={{display:'none'}}/>
               </label>
             </div>
             <button onClick={loadDefault} style={{background:'none',border:'none',color:'#d1d5db',
