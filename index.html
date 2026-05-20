@@ -8,6 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -4253,108 +4254,84 @@ function downloadResultsCSV(rows, loadCase, nodePositions, channels, scaleVal) {
 }
 
 function EnvelopeChart({ envData, unit, nodePositions={} }) {
-  const canvasRef=useRef(null), chartRef=useRef(null);
+  const divRef=useRef(null);
   useEffect(()=>{
-    if (!canvasRef.current||!envData?.length) return;
-    if (chartRef.current) chartRef.current.destroy();
-    const labels=envData.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node].toFixed(1)+' ft':`N${p.node}`);
-    chartRef.current=new Chart(canvasRef.current,{type:'line',
-      data:{labels,datasets:[
-        {label:'+ Envelope',data:envData.map(p=>+p.max.toFixed(3)),borderColor:'#059669',backgroundColor:'#05966922',borderWidth:2,pointRadius:0,fill:'origin',tension:0},
-        {label:'− Envelope',data:envData.map(p=>+p.min.toFixed(3)),borderColor:'#dc2626',backgroundColor:'#dc262622',borderWidth:2,pointRadius:0,fill:'origin',tension:0},
-        {label:'_zero',data:envData.map(()=>0),borderColor:'#d1d5db',borderWidth:1,pointRadius:0,borderDash:[4,3],fill:false},
-      ]},
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:true,labels:{font:{family:'IBM Plex Mono',size:10.5},
-          filter:item=>!item.text.startsWith('_')}},
-          tooltip:{callbacks:{
-            title:(items)=>{const p=envData[items[0]?.dataIndex];return p?`Node ${p.node}${nodePositions[p.node]!==undefined?' · '+nodePositions[p.node].toFixed(2)+' ft':''}`:'';}  ,
-            label:(ctx)=>ctx.datasetIndex<2?`${ctx.dataset.label}: ${ctx.parsed.y.toFixed(3)} ${unit}`:null,
-            filter:item=>item.datasetIndex<2,
-          }}
-        },
-        scales:{x:{ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
-          y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}}}}
-    });
-    return()=>{if(chartRef.current) chartRef.current.destroy();};
+    if(!divRef.current||!envData?.length) return;
+    const xs=envData.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node]:p.node);
+    const customdata=envData.map(p=>`N${p.node}${nodePositions[p.node]!==undefined?' · '+nodePositions[p.node].toFixed(2)+' ft':''}`);
+    const ht=`%{customdata}<br>%{y:.3f} ${unit}<extra>%{fullData.name}</extra>`;
+    Plotly.newPlot(divRef.current,[
+      {x:xs,y:envData.map(p=>p.max),name:'+ Envelope',line:{color:'#059669',width:2},
+       fill:'tozeroy',fillcolor:'#05966618',mode:'lines',type:'scatter',
+       customdata,hovertemplate:ht},
+      {x:xs,y:envData.map(p=>p.min),name:'− Envelope',line:{color:'#dc2626',width:2},
+       fill:'tozeroy',fillcolor:'#dc262618',mode:'lines',type:'scatter',
+       customdata,hovertemplate:ht},
+    ],{
+      margin:{l:52,r:16,t:18,b:40},
+      xaxis:{title:{text:'Position (ft)',font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      yaxis:{title:{text:unit,font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      legend:{orientation:'h',y:1.08,font:{family:'monospace',size:10}},
+      paper_bgcolor:'#fff',plot_bgcolor:'#fafafa',hovermode:'x unified',
+      shapes:[{type:'line',x0:xs[0],x1:xs[xs.length-1],y0:0,y1:0,line:{color:'#d1d5db',width:1,dash:'dot'}}],
+    },{responsive:true,displayModeBar:true,displaylogo:false,
+      modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
+    return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[envData]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
 }
 
 function DirectChart({ pts, label, unit, color, nodePositions={} }) {
-  const canvasRef=useRef(null), chartRef=useRef(null);
+  const divRef=useRef(null);
   useEffect(()=>{
-    if (!canvasRef.current||!pts?.length) return;
-    if (chartRef.current) chartRef.current.destroy();
-    const labels=pts.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node].toFixed(1)+' ft':`N${p.node}`);
-    chartRef.current=new Chart(canvasRef.current,{type:'line',
-      data:{labels,datasets:[
-        {label,data:pts.map(p=>+p.val.toFixed(3)),borderColor:color,backgroundColor:color+'1a',borderWidth:2,pointRadius:0,fill:true,tension:0},
-        {label:'_z',data:pts.map(()=>0),borderColor:'#d1d5db',borderWidth:1,pointRadius:0,borderDash:[4,3],fill:false},
-      ]},
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:false},tooltip:{callbacks:{
-          title:(items)=>{const p=pts[items[0]?.dataIndex];return p?`Node ${p.node}${nodePositions[p.node]!==undefined?' · '+nodePositions[p.node].toFixed(2)+' ft':''}`:'';},
-          label:(ctx)=>ctx.datasetIndex===0?`${label}: ${ctx.parsed.y.toFixed(3)} ${unit}`:null,
-          filter:item=>item.datasetIndex===0,
-        }}},
-        scales:{x:{ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
-          y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}}}}
-    });
-    return()=>{if(chartRef.current) chartRef.current.destroy();};
+    if(!divRef.current||!pts?.length) return;
+    const xs=pts.map(p=>nodePositions[p.node]!==undefined?nodePositions[p.node]:p.node);
+    const customdata=pts.map(p=>`N${p.node}${nodePositions[p.node]!==undefined?' · '+nodePositions[p.node].toFixed(2)+' ft':''}`);
+    Plotly.newPlot(divRef.current,[{
+      x:xs, y:pts.map(p=>p.val), name:label,
+      line:{color,width:2}, fill:'tozeroy', fillcolor:color+'20',
+      mode:'lines', type:'scatter', customdata,
+      hovertemplate:`%{customdata}<br>${label}: %{y:.3f} ${unit}<extra></extra>`,
+    }],{
+      margin:{l:52,r:16,t:10,b:40},showlegend:false,
+      xaxis:{title:{text:'Position (ft)',font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      yaxis:{title:{text:unit,font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      paper_bgcolor:'#fff',plot_bgcolor:'#fafafa',hovermode:'x unified',
+    },{responsive:true,displayModeBar:true,displaylogo:false,
+      modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
+    return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[pts]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
 }
-
 function MultiOverlayChart({ rows, loadCases, field, label, unit, colors, nodePositions={} }) {
-  const canvasRef = useRef(null);
-  const chartRef  = useRef(null);
+  const divRef=useRef(null);
   useEffect(()=>{
-    if (!canvasRef.current || !rows.length || !loadCases.length) return;
-    if (chartRef.current) chartRef.current.destroy();
-    // Build common x-axis from all nodes across all LCs
-    const allNodes = [...new Set(rows.filter(r=>loadCases.includes(r.load)).map(r=>r.node).filter(Boolean))]
-      .sort((a,b)=>(nodePositions[a]??a)-(nodePositions[b]??b));
-    const labels = allNodes.map(n=>nodePositions[n]!==undefined ? nodePositions[n].toFixed(1)+' ft' : `N${n}`);
-    // Build datasets using physical positions for correct x-axis spacing
-    const datasets = loadCases.map((lc,i)=>{
-      const pts = buildDiagram(rows, lc, field, nodePositions);
+    if(!divRef.current||!rows.length||!loadCases.length) return;
+    const traces=loadCases.map((lc,i)=>{
+      const pts=buildDiagram(rows,lc,field,nodePositions);
+      const col=colors[i%colors.length];
+      const customdata=pts.map(p=>`${lc} · ${p.pos.toFixed(2)} ft`);
       return {
-        label: lc.replace(/_[^_]+$/,'').slice(0,40),
-        data: pts.map(p=>({ x: +p.pos.toFixed(4), y: +(p.val*scaleVal).toFixed(3) })),
-        borderColor: colors[i%colors.length],
-        backgroundColor: 'transparent',
-        borderWidth: 2, pointRadius: pts.length>60?0:2,
-        pointHoverRadius: 4, fill: false, tension: 0, spanGaps: false,
-        showLine: true,
+        x:pts.map(p=>p.pos), y:pts.map(p=>p.val*scaleVal),
+        name:lc.replace(/_[^_]+$/,'').slice(0,40),
+        line:{color:col,width:2}, mode:'lines', type:'scatter',
+        customdata, hovertemplate:`%{customdata}<br>%{y:.3f} ${unit}<extra>%{fullData.name}</extra>`,
       };
     });
-    // Zero reference line at physical positions
-    const allXPositions = [...new Set(datasets.flatMap(ds=>ds.data.map(d=>d.x)))].sort((a,b)=>a-b);
-    datasets.push({label:'_zero',data:allXPositions.map(x=>({x,y:0})),borderColor:'#d1d5db',
-      showLine:true,borderWidth:1,pointRadius:0,borderDash:[4,3],fill:false});
-    chartRef.current = new Chart(canvasRef.current,{
-      type:'scatter', data:{datasets},
-      options:{responsive:true,maintainAspectRatio:false,
-        interaction:{mode:'nearest',intersect:false},
-        plugins:{
-          legend:{display:true,labels:{font:{family:'IBM Plex Mono',size:10},
-            filter:item=>!item.text.startsWith('_'),boxWidth:14}},
-          tooltip:{callbacks:{
-            title:(items)=>{const d=items[0];return d?`${d.parsed.x.toFixed(2)} ft`:'';},
-            label:(ctx)=>ctx.datasetIndex<loadCases.length?`${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(3)??'—'} ${unit}`:null,
-            filter:item=>item.datasetIndex<loadCases.length,
-          }}
-        },
-        scales:{
-          x:{type:'linear',ticks:{maxTicksLimit:18,font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280',callback:v=>v.toFixed(1)+' ft'},grid:{color:'#f3f4f6'}},
-          y:{ticks:{font:{family:'IBM Plex Mono',size:9.5},color:'#6b7280'},grid:{color:'#f3f4f6'}},
-        }
-      }
-    });
-    return()=>{if(chartRef.current) chartRef.current.destroy();};
+    Plotly.newPlot(divRef.current, traces, {
+      margin:{l:52,r:16,t:10,b:40},
+      xaxis:{title:{text:'Position (ft)',font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6',
+        ticksuffix:' ft'},
+      yaxis:{title:{text:unit,font:{size:10}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      legend:{orientation:'h',y:1.08,font:{family:'monospace',size:10}},
+      paper_bgcolor:'#fff',plot_bgcolor:'#fafafa',hovermode:'x unified',
+      shapes:[{type:'line',x0:0,x1:1,xref:'paper',y0:0,y1:0,
+               line:{color:'#d1d5db',width:1,dash:'dot'}}],
+    },{responsive:true,displayModeBar:true,displaylogo:false,
+      modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
+    return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[rows,loadCases,field]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
 }
 
 // ── Module-level PNG download (uses Chart.js registry) ───────────────────────
@@ -11260,97 +11237,21 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   );
                 })()}
 
-                {/* ── RF Envelope Chart ── */}
-                {aremaAsdData.length>1&&(()=>{
-                  const W=680, H=220, PL=52, PR=16, PT=18, PB=36;
-                  const cW=W-PL-PR, cH=H-PT-PB;
-                  const xs=aremaAsdData.map(p=>p.pos);
-                  const xMin=xs[0], xMax=xs[xs.length-1], xRange=xMax-xMin||1;
-                  const xPx=x=>PL+(x-xMin)/xRange*cW;
-                  const rfAll=[...aremaAsdData.flatMap(p=>[p.gN,p.gX,p.gM,p.rfFat].filter(v=>v!=null&&isFinite(v)))];
-                  const rfMin=Math.min(0,Math.min(...rfAll)), rfMax=Math.max(2,Math.max(...rfAll));
-                  const rfRange=rfMax-rfMin||1;
-                  const yPx=rf=>PT+cH-(rf-rfMin)/rfRange*cH;
-                  const mkLine=(key,col)=>{
-                    const pts=aremaAsdData
-                      .filter(p=>p[key]!=null&&isFinite(p[key]))   // filter nulls FIRST (null coerces to 0 in yPx)
-                      .map(p=>({x:xPx(p.pos),y:yPx(p[key])}));
-                    if(!pts.length) return null;
-                    return <polyline key={key} points={pts.map(pt=>`${pt.x.toFixed(1)},${pt.y.toFixed(1)}`).join(' ')}
-                      fill="none" stroke={col} strokeWidth="2" strokeLinejoin="round"/>;
-                  };
-                  const y1=yPx(1);
-                  // Y-axis ticks
-                  const yTicks=[];
-                  for(let rf=Math.ceil(rfMin*2)/2; rf<=rfMax+0.01; rf+=0.5)
-                    yTicks.push(rf);
-                  return (
+                {/* ── RF Envelope Chart — Plotly ── */}
+                {aremaAsdData.length>1&&(
                   <div style={{marginBottom:'12px',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
                     <div style={{padding:'7px 14px',background:'#f8fafc',borderBottom:'1px solid #e5e7eb',
-                      display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
+                      display:'flex',alignItems:'center',gap:'8px'}}>
                       <span style={{fontSize:'11px',fontWeight:'700',color:'#374151',fontFamily:'monospace'}}>
                         📈 RF Envelope
                       </span>
-                      {[['Normal','#16a34a'],['Maximum','#c2410c'],['Modified','#d97706'],['Fatigue','#7e22ce']].map(([l,c])=>(
-                        <span key={l} style={{display:'flex',alignItems:'center',gap:'4px',fontSize:'9px',fontFamily:'monospace',color:c}}>
-                          <svg width="18" height="4"><line x1="0" y1="2" x2="18" y2="2" stroke={c} strokeWidth="2.5"/></svg>
-                          {l}
-                        </span>
-                      ))}
                       <span style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
-                        Dashed = RF 1.0 threshold
+                        Hover for details · Scroll to zoom · Drag to pan
                       </span>
                     </div>
-                    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',display:'block',background:'#fff'}}>
-                      {/* Grid lines */}
-                      {yTicks.map(rf=>(
-                        <g key={rf}>
-                          <line x1={PL} y1={yPx(rf)} x2={W-PR} y2={yPx(rf)}
-                            stroke="#f3f4f6" strokeWidth="1"/>
-                          <text x={PL-4} y={yPx(rf)} textAnchor="end" dominantBaseline="middle"
-                            fontSize="9" fontFamily="monospace" fill="#9ca3af">{rf.toFixed(1)}</text>
-                        </g>
-                      ))}
-                      {/* RF=1.0 threshold */}
-                      {y1>=PT&&y1<=H-PB&&<>
-                        <line x1={PL} y1={y1} x2={W-PR} y2={y1}
-                          stroke="#dc2626" strokeWidth="1.5" strokeDasharray="6,3"/>
-                        <text x={W-PR+3} y={y1} dominantBaseline="middle" fontSize="9"
-                          fontFamily="monospace" fill="#dc2626" fontWeight="700">1.0</text>
-                      </>}
-                      {/* Pass/fail shading */}
-                      {y1>=PT&&y1<=H-PB&&
-                        <rect x={PL} y={y1} width={cW} height={H-PB-y1}
-                          fill="#fee2e2" opacity="0.25"/>}
-                      {/* RF lines */}
-                      {mkLine('gN','#16a34a')}
-                      {mkLine('gX','#c2410c')}
-                      {mkLine('gM','#d97706')}
-                      {mkLine('rfFat','#7e22ce')}
-                      {/* Data dots — governing nodes */}
-                      {[['gN','#16a34a'],[' gX','#c2410c'],['gM','#d97706'],['rfFat','#7e22ce']].map(([k,c])=>(
-                        aremaAsdData.filter(p=>p[k.trim()]!=null&&isFinite(p[k.trim()])).map(p=>(
-                          <circle key={p.node+k} cx={xPx(p.pos)} cy={yPx(p[k.trim()])}
-                            r="2.5" fill={c} opacity="0.7"/>
-                        ))
-                      ))}
-                      {/* X axis */}
-                      <line x1={PL} y1={H-PB} x2={W-PR} y2={H-PB} stroke="#d1d5db" strokeWidth="1"/>
-                      {xs.filter((_,i)=>i===0||i===xs.length-1||i%Math.max(1,Math.floor(xs.length/8))===0).map(x=>(
-                        <g key={x}>
-                          <line x1={xPx(x)} y1={H-PB} x2={xPx(x)} y2={H-PB+4} stroke="#9ca3af" strokeWidth="1"/>
-                          <text x={xPx(x)} y={H-PB+14} textAnchor="middle" fontSize="8.5"
-                            fontFamily="monospace" fill="#9ca3af">{x.toFixed(1)}</text>
-                        </g>
-                      ))}
-                      <text x={W/2} y={H-2} textAnchor="middle" fontSize="8.5"
-                        fontFamily="monospace" fill="#9ca3af">Position (ft)</text>
-                      <text x={10} y={H/2} textAnchor="middle" fontSize="8.5"
-                        fontFamily="monospace" fill="#9ca3af"
-                        transform={`rotate(-90,10,${H/2})`}>AREMA Rating</text>
-                    </svg>
-                  </div>);
-                })()}
+                    <AremaRFChart data={aremaAsdData}/>
+                  </div>
+                )}
 
                 {/* ── Governing Calculation Sheet ── */}
                 {govAsdN&&(()=>{
@@ -13037,6 +12938,57 @@ function SavesModal({ cfg, onLoad, onClose,
       </div>
     </div>
   );
+}
+
+function AremaRFChart({ data }) {
+  const divRef = useRef(null);
+  useEffect(()=>{
+    if (!divRef.current || !data?.length) return;
+    const series = [
+      {key:'gN',   name:'Normal',   color:'#16a34a'},
+      {key:'gX',   name:'Maximum',  color:'#c2410c'},
+      {key:'gM',   name:'Modified', color:'#d97706'},
+      {key:'rfFat',name:'Fatigue',  color:'#7e22ce'},
+    ];
+    const traces = series.map(s => {
+      const pts = data.filter(p=>p[s.key]!=null&&isFinite(p[s.key]));
+      const eRating = pts.map(p=>'E-'+(p[s.key]*80).toFixed(1));
+      return {
+        x: pts.map(p=>p.pos),
+        y: pts.map(p=>p[s.key]),
+        name: s.name,
+        line: {color:s.color, width:2.5},
+        mode: 'lines',
+        type: 'scatter',
+        customdata: pts.map((p,i)=>[`N${p.node}`,eRating[i]]),
+        hovertemplate: '<b>%{customdata[0]}</b> · %{x:.2f} ft<br>RF: %{y:.3f}<br>E-Rating: %{customdata[1]}<extra>'+s.name+'</extra>',
+      };
+    });
+    const xMin=data[0]?.pos??0, xMax=data[data.length-1]?.pos??1;
+    Plotly.newPlot(divRef.current, traces, {
+      shapes:[
+        {type:'rect', x0:xMin,x1:xMax, y0:0,y1:1,
+         fillcolor:'#fee2e2', opacity:0.25, line:{width:0}, layer:'below'},
+        {type:'line', x0:xMin,x1:xMax, y0:1,y1:1,
+         line:{color:'#dc2626',width:1.5,dash:'dash'}},
+      ],
+      annotations:[{x:xMax,y:1,xanchor:'right',yanchor:'bottom',
+        text:'RF = 1.0',showarrow:false,
+        font:{color:'#dc2626',size:10,family:'monospace'}}],
+      xaxis:{title:{text:'Position along span (ft)',font:{size:10,family:'monospace'}},
+        tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6',
+        range:[xMin,xMax]},
+      yaxis:{title:{text:'Rating Factor (RF)',font:{size:10,family:'monospace'}},
+        tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      legend:{orientation:'h',y:1.08,font:{family:'monospace',size:10.5}},
+      margin:{l:52,r:20,t:32,b:48},
+      paper_bgcolor:'#fff', plot_bgcolor:'#fafafa',
+      hovermode:'x unified',
+    },{responsive:true,displayModeBar:true,displaylogo:false,
+       modeBarButtonsToRemove:['select2d','lasso2d'],scrollZoom:true});
+    return()=>{ if(divRef.current) Plotly.purge(divRef.current); };
+  },[data]);
+  return <div ref={divRef} style={{width:'100%',height:'280px'}}/>;
 }
 
 function App() {
