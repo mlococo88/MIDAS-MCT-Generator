@@ -354,8 +354,10 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     try{
       const zDef={...AS,...libSec};
       const s=computeAremaSection(zDef, false);  // MCT: always nominal
+      const secInsp = (libSec.sectionLossEnabled && aremaApplyLoss)
+        ? computeAremaSection(zDef, true) : null;
       return {name:libSec.name||libSec.id, svg:aremaGirderSVG(zDef,s), sec:s,
-              allo:aremaAllowables(zDef,s), zDef};
+              secInsp, allo:aremaAllowables(zDef,s), zDef};
     }catch(e){return null;}
   }).filter(Boolean);
 
@@ -513,7 +515,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
 
   <!-- ═══════════════ SECTION 2: CROSS-SECTION PROPERTIES ═══════════════ -->
   ${Sec('2. Cross-Section Properties',{color:'#059669',bg:'#f0fdf4',br:true})}
-  ${secSVGs.map(({name,svg,sec:s,allo:a,zDef:z})=>`
+  ${secSVGs.map(({name,svg,sec:s,secInsp,allo:a,zDef:z})=>`
   ${Sub(name+' — Built-Up Section Properties',{color:'#059669'})}
   <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;margin-bottom:12px;align-items:start">
     <svg viewBox="0 0 200 380" xmlns="http://www.w3.org/2000/svg" style="width:180px;height:340px;border:1px solid #e5e7eb;border-radius:4px">
@@ -539,8 +541,9 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     </div>
   </div>
 
-  <!-- Parallel Axis Theorem Detail -->
+  <!-- Parallel Axis Theorem Detail — Nominal + As-Inspected when section loss active -->
   ${(()=>{
+    function mkSecDetailHtml(s,isInsp){
     const TH2=(t,opts={})=>`<th style="padding:3px 6px;border:1px solid ${opts.bc||'#d1fae5'};font-size:7.5pt;font-family:monospace;font-weight:700;background:${opts.bg||'#f0fdf4'};color:${opts.c||'#065f46'};text-align:${opts.align||'right'};white-space:nowrap">${t}</th>`;
     const TD2=(t,opts={})=>`<td style="padding:2px 6px;border:1px solid ${opts.bc||'#e5e7eb'};font-size:7.5pt;font-family:monospace;text-align:${opts.align||'right'};font-weight:${opts.bold?'700':'400'};color:${opts.c||'#374151'};background:${opts.bg||'transparent'}">${t}</td>`;
     const n1=v=>(+v).toFixed(1), n2=v=>(+v).toFixed(2), n3=v=>(+v).toFixed(3);
@@ -579,17 +582,17 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     </table></div>`;
 
     // Net section table
-    const nRows=s.items.map(it=>{const d=it.yc-s.ybN;const Ixo_n=it.IxoNet??it.Ixo*it.nF;return{...it,d,Ixo_n,Ad2:it.netA*d*d,contrib:Ixo_n+it.netA*d*d};});
+    const nRows=s.items.map(it=>{const d=it.yc-s.ybN;const Ixo_n=it.IxoNet??it.Ixo*it.nF;return{...it,item:it,d,Ixo_n,Ad2:it.netA*d*d,contrib:Ixo_n+it.netA*d*d};});
     const netCols=['Component','An (in²)','yc (in)','An·yc','Ixo_net','d=yc−ȳN','An·d²','Ix contrib'];
     const netTable=`
-    <div style="font-size:9pt;font-weight:700;color:#991b1b;margin:10px 0 4px">② Net Section — IxN (tension flange check · ★ = holes deducted)</div>
+    <div style="font-size:9pt;font-weight:700;color:#991b1b;margin:10px 0 4px">② Net Section — IxN (tension flange check · ★ = holes deducted · †85 = 0.85×gross floor governs)</div>
     <div style="overflow-x:auto;margin-bottom:10px">
     <table style="border-collapse:collapse;width:100%;font-size:7.5pt;font-family:monospace">
       <thead><tr>${netCols.map((h,i)=>TH2(h,{align:i===0?'left':'right',bg:'#fee2e2',c:'#991b1b',bc:'#fca5a5'})).join('')}</tr></thead>
       <tbody>
       ${nRows.map((r,i)=>`<tr style="background:${r.tension?'#fff7f7':i%2===0?'#fff':'#f9fafb'}">
         ${TD2(r.label+(r.tension?' ★':''),{align:'left'})}
-        ${TD2(n3(r.netA))}${TD2(n3(r.yc))}${TD2(n2(r.netA*r.yc))}
+        ${TD2(n3(r.netA)+(r.net85?' …85':''))}${TD2(n3(r.yc))}${TD2(n2(r.netA*r.yc))}
         ${TD2(n2(r.Ixo_n))}
         ${TD2(n3(r.d),{c:r.d>=0?'#1d4ed8':'#dc2626'})}
         ${TD2(n2(r.Ad2))}${TD2(n2(r.contrib),{bold:true})}</tr>`).join('')}
@@ -625,7 +628,12 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
       </tbody>
     </table>`;
 
-    return grossTable+netTable+ltbTable;
+    return (isInsp
+      ? '<div style="margin-top:14px;padding:5px 10px;background:#fffbeb;border:1px solid #fcd34d;border-radius:4px;font-size:9pt;font-weight:700;color:#b45309;margin-bottom:6px">'
+        + '🔍 As-Inspected Section (section loss applied to nominal dimensions)</div>' : '')
+      + grossTable+netTable+ltbTable;
+    }
+    return mkSecDetailHtml(s,false)+(secInsp?mkSecDetailHtml(secInsp,true):'');
   })()}
   `).join('')}
 
@@ -794,7 +802,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     <tbody>
     ${Row('Stress range allowable SFT','AREMA §1.7 Category '+ap.fatCat,ap.SFT+' ksi')}
     ${Row('Net section modulus Sx_bot_net','from section properties',f(govFat.sec?.SxBotN,2)+' in³')}
-    ${Row('β — fatigue impact reduction (AREMA Table 15-7-1)','I_fat = 1 + '+f(ap.fatBeta,2)+'×('+f(ap.iBase,4)+'+'+f(ap.I_rock,4)+')', f(ap.I_fat,4))}
+    ${Row('β — fatigue impact reduction (AREMA Table 15-7-1)','I_fat = 1 + '+f(ap.fatBeta,2)+'×'+f(ap.ballastF,1)+'×('+f(ap.iBase,4)+'+'+f(ap.I_rock,4)+')', f(ap.I_fat,4))}
     ${Row('α — live load reduction (§15-7.3.3.2.1c · applied when SR ≤ 12 ksi)',''+((govFat?.fatAlphaFlag)?'⚠ SR_no_α='+f(govFat.SR_no_alpha,2)+' ksi > 12 ksi — check if α applies':'SR condition met'), 'α = '+f(ap.fatAlpha,2))}
     ${Row('dM_fat = α×(dM÷f1pI×I_fat + M_CF)', f(ap.fatAlpha,2)+'×('+f((govFat?.dM/ap.f1pI*ap.I_fat)||0,2)+'+'+f(ap.M_CF,2)+')', f(govFat?.dM_fat,2)+' ft-k')}
     ${Row('Fatigue capacity Mf = SFT × Sx_bot_net / 12',ap.SFT+' × '+f(govFat.sec?.SxBotN,2)+' / 12',f(ap.SFT*(govFat.sec?.SxBotN||0)/12,2)+' ft-k')}
@@ -810,25 +818,37 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
   <p class="note" style="margin-bottom:10px">All moment values in ft-kips · All shear values in kips · ★ = governing node (minimum RF) · RF = (Capacity − MDL) / denom</p>
 
   ${mkNodeTable('9.1 Normal Flexure (AREMA Table 15-1-11)','#15803d','#f0fdf4',
-    ['denom_N (ft-k)','Mc_N (ft-k)','RF_comp_N','Mt_N (ft-k)','RF_tens_N','RF_N'],
-    (p)=>nodeRow(p,govN?.node===p.node,
-      TD(f(p.denomN,1))+TD(f(p.McN,1),{bg:'#f0fdf4'})+TD(f(p.rfcN,3),{color:rfC(p.rfcN)})+
-      TD(f(p.MtN,1),{bg:'#f0fdf4'})+TD(f(p.rftN,3),{color:rfC(p.rftN)})+
-      TD(f(p.gN,3),{bg:'#dcfce7',bold:true,color:rfC(p.gN)})))}
+    ['denom_N (ft-k)','Mc_N (ft-k)','RF_comp_N','Mt_N (ft-k)','RF_tens_N','RF_N','fDL_top(ksi)','fLL_top(ksi)','Fb_N(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_N(ksi)'],
+    (p)=>{
+      const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
+      return nodeRow(p,govN?.node===p.node,
+        TD(f(p.denomN,1))+TD(f(p.McN,1),{bg:'#f0fdf4'})+TD(f(p.rfcN,3),{color:rfC(p.rfcN)})+
+        TD(f(p.MtN,1),{bg:'#f0fdf4'})+TD(f(p.rftN,3),{color:rfC(p.rftN)})+
+        TD(f(p.gN,3),{bg:'#dcfce7',bold:true,color:rfC(p.gN)})+
+        TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomN,p.sec?.SxTopG))+TD(f(p.allo?.Fb_N,2),{bold:true})+
+        TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_N,2),{bold:true}));
+    })}
 
   ${mkNodeTable('9.2 Maximum Flexure (K-factor, +CF in denom)','#c2410c','#fff7ed',
-    ['denom_N (ft-k)','Mc_X (ft-k)','RF_comp_X','Mt_X (ft-k)','RF_tens_X','RF_X'],
-    (p)=>nodeRow(p,govX?.node===p.node,
+    ['denom_N (ft-k)','Mc_X (ft-k)','RF_comp_X','Mt_X (ft-k)','RF_tens_X','RF_X','fDL_top(ksi)','fLL_top(ksi)','Fb_X(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_X(ksi)'],
+    (p)=>{const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
+     return nodeRow(p,govX?.node===p.node,
       TD(f(p.denomN,1))+TD(f(p.McX,1),{bg:'#fff7ed'})+TD(f(p.rfcX,3),{color:rfC(p.rfcX)})+
       TD(f(p.MtX,1),{bg:'#fff7ed'})+TD(f(p.rftX,3),{color:rfC(p.rftX)})+
-      TD(f(p.gX,3),{bg:'#fed7aa',bold:true,color:rfC(p.gX)})))}
-
+      TD(f(p.gX,3),{bg:'#fed7aa',bold:true,color:rfC(p.gX)})+
+      TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomN,p.sec?.SxTopG))+TD(f(p.allo?.Fb_X,2),{bold:true})+
+      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true}));
+    })}
   ${mkNodeTable('9.3 Modified Flexure (K-factor, all lateral in denom)','#92400e','#fffbeb',
-    ['denom_Mod (ft-k)','Mc_X (ft-k)','RF_comp_M','Mt_X (ft-k)','RF_tens_M','RF_M'],
-    (p)=>nodeRow(p,govM?.node===p.node,
+    ['denom_Mod (ft-k)','Mc_X (ft-k)','RF_comp_M','Mt_X (ft-k)','RF_tens_M','RF_M','fDL_top(ksi)','fLL_top(ksi)','Fb_X(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_X(ksi)'],
+    (p)=>{const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
+     return nodeRow(p,govM?.node===p.node,
       TD(f(p.denomMod,1))+TD(f(p.McX,1),{bg:'#fffbeb'})+TD(f(p.rfcM,3),{color:rfC(p.rfcM)})+
       TD(f(p.MtX,1),{bg:'#fffbeb'})+TD(f(p.rftM,3),{color:rfC(p.rftM)})+
-      TD(f(p.gM,3),{bg:'#fef3c7',bold:true,color:rfC(p.gM)})))}
+      TD(f(p.gM,3),{bg:'#fef3c7',bold:true,color:rfC(p.gM)})+
+      TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomMod,p.sec?.SxTopG))+TD(f(p.allo?.Fb_X,2),{bold:true})+
+      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomMod,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true}));
+    })}
 
   ${mkNodeTable('9.4 Shear — All Cases','#374151','#f3f4f6',
     ['VDL (k)','dV_N (k)','Vn_N (k)','RF_shear_N','Vn_X (k)','RF_shear_X','dV_mod (k)','RF_shear_M'],
@@ -1560,9 +1580,11 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
       <div style={{marginTop:'3px',borderTop:'1px dashed #fde68a',paddingTop:'2px'}}>
         <div style={{fontSize:'7px',fontFamily:'monospace',color:'#b45309',marginBottom:'1px',
           fontWeight:'700',letterSpacing:'0.02em'}}>{label||'loss (in)'}</div>
-        <input type="number" step="0.01" min="0" style={LI}
-          value={curVal||''} placeholder="0"
-          onChange={e=>updLibComp(curIdx,cid,field,parseFloat(e.target.value)||0)}/>
+        <input type="number" step="0.001" min="0" style={LI}
+          key={`loss-${curIdx}-${cid}-${field}`}
+          defaultValue={curVal||0}
+          placeholder="0"
+          onBlur={e=>updLibComp(curIdx,cid,field,parseFloat(e.target.value)||0)}/>
       </div>
     );
   };
@@ -1612,7 +1634,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
               {gRows.map((r,i)=>(
                 <tr key={i} style={{background:i%2===0?'#fff':'#f9fafb'}}>
                   <td style={{...td(false),fontSize:'7px'}}>{r.label}<br/><span style={{color:'#9ca3af',fontSize:'6.5px'}}>{r.note}</span></td>
-                  <td style={td()}>{n3(r.A)}</td>
+                  <td style={td()}>{n3(r.A)}{r.item?.net85&&<span title='0.85×gross floor governs' style={{color:'#f59e0b',fontWeight:700,fontSize:'7px',marginLeft:'2px'}}>†85</span>}</td>
                   <td style={td()}>{n3(r.yc)}</td>
                   <td style={td()}>{n2(r.Ayc)}</td>
                   <td style={td()}>{n2(r.Ixo)}</td>
@@ -1961,9 +1983,26 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
                         </div>
                         :<div style={{fontSize:'9px',color:'#d1d5db',textAlign:'center',fontFamily:'monospace'}}>—</div>}
                     </td>
-                    <td style={{border:'1px solid #dbeafe',padding:'1px',textAlign:'center'}}>
+                    <td style={{border:'1px solid #dbeafe',padding:'1px',textAlign:'center',verticalAlign:'top'}}>
                       {row.fixedQty
-                        ?<span style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af'}}>{c.qty||1}</span>
+                        ?<div>
+                          <span style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',display:'block'}}>{c.qty||2}</span>
+                          {isAngle&&cur.sectionLossEnabled&&(
+                            <div style={{marginTop:'3px',display:'flex',flexDirection:'column',gap:'2px',alignItems:'center'}}>
+                              {[['lossL','L'],['lossR','R']].map(([field,lbl])=>(
+                                <label key={field} style={{display:'flex',alignItems:'center',gap:'2px',cursor:'pointer',
+                                  fontSize:'8px',fontFamily:'monospace',
+                                  color:c[field]!==false?'#15803d':'#9ca3af',fontWeight:c[field]!==false?'700':'400'}}>
+                                  <input type="checkbox"
+                                    checked={c[field]!==false}
+                                    onChange={e=>updLibComp(curIdx,row.id,field,e.target.checked)}
+                                    style={{accentColor:'#16a34a',width:'10px',height:'10px',cursor:'pointer'}}/>
+                                  {lbl}
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         :<input type="number" step="1" min="1" max="10" disabled={disabled}
                             style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'10.5px',width:'100%',padding:'2px 3px',textAlign:'center'}}
                             value={c.qty||1}
@@ -4857,6 +4896,10 @@ function computeAremaSection(z, useInspected) {
       ? (webHolesN-1)*webHolePitch**2/(4*webHoleGage) : 0;
     return Math.max(gross - deduct + stagger, 0.85*gross);
   }
+  // 0.85x gross floor detection helpers
+  const _raw=(gross,n,d,p,g)=>gross-n*d+(n>1&&p>0&&g>0?(n-1)*p**2/(4*g):0);
+  const is85   =(gross)=>holeDiam&&holesN   ? _raw(gross,holesN,holeDiam,holePitch,holeGage)     < 0.85*gross : false;
+  const is85Web=(gross)=>webHoleDiam&&webHolesN ? _raw(gross,webHolesN,webHoleDiam,webHolePitch,webHoleGage) < 0.85*gross : false;
 
   // ── Build item list ────────────────────────────────────────────────────────
   // Position (yc) always uses nominal geometry; area/Ixo use effective dimensions.
@@ -4866,44 +4909,53 @@ function computeAremaSection(z, useInspected) {
   if (bcp.on && bcp.t>0) {
     const qty   = bcp.qty||1;
     const w_eff = effDim(+bcp.w, bcp.lossW);    // W col → width
-    const t_eff = effDim(+bcp.t, bcp.lossHt);   // H/t col → thickness
-    const h_nom = +bcp.t * qty;
-    const h_eff = t_eff * qty;
+    const h_nom = +bcp.t * qty;                  // total nominal height
+    const h_eff = effDim(h_nom, bcp.lossHt);    // loss on TOTAL stack (outer plate only) → e.g. 3"−0.5"=2.5"
+    const t_eff = h_eff / qty;                   // effective per-plate thickness for display
     const grossA = w_eff * h_eff;
     const netA   = netWidth(w_eff) * h_eff;
     const yc     = h_nom / 2;
     items.push({id:'bcp',label:'Bot Cover Plates',grossA,netA,yc,
                 Ixo:w_eff*h_eff**3/12,tension:true,color:'#3b82f6',
-                nF:netA/Math.max(grossA,1e-9),
-                note:`${qty}pl × ${w_eff.toFixed(3)}"×${t_eff.toFixed(3)}"`});
+                net85:is85(w_eff), nF:netA/Math.max(grossA,1e-9),
+                note:`${qty}pl × ${w_eff.toFixed(3)}"×${h_eff.toFixed(3)}" total (${t_eff.toFixed(3)}" ea)`});
   }
 
-  // Bottom angles — legs from tip (lossW, lossHt); H-leg thickness (lossTH); V-leg thickness (lossTV)
+  // Bottom angles — split into L and R items to support asymmetric section loss
   if (ban.on && ban.w>0 && ban.h>0 && ban.t>0) {
-    const qty    = ban.qty||2;
-    const w_eff  = effDim(+ban.w,  ban.lossW);    // H-leg length from free tip
-    const h_eff  = effDim(+ban.h,  ban.lossHt);   // V-leg length from free tip
-    const th_eff = effDim(+ban.t,  ban.lossTH);   // H-leg (horizontal) effective thickness
-    const tv_eff = effDim(+ban.t,  ban.lossTV);   // V-leg (vertical/web) effective thickness
-    const ap     = calcAngleProps(w_eff, h_eff, +ban.t, th_eff, tv_eff);
-    const grossA = ap.area * qty;
-    // Net section: holes in outstanding (horizontal) leg
-    const A_vert  = tv_eff * h_eff;                // gross vertical leg
-    const h_vert_net = netWidthWeb(h_eff);          // web holes reduce vertical leg net height
-    const A_vert_net = tv_eff * h_vert_net;         // net vertical leg area
-    const nHW     = netWidth(w_eff - tv_eff);       // flange holes on outstanding leg
-    const nHoriz  = nHW * th_eff;
-    const netA    = (A_vert_net + nHoriz) * qty;
-    const yc_net  = (A_vert_net+nHoriz)>0
-      ? (A_vert_net*(h_vert_net/2) + nHoriz*(th_eff/2)) / (A_vert_net+nHoriz) : 0;
-    const I1n = tv_eff*h_vert_net**3/12 + A_vert_net*(h_vert_net/2-yc_net)**2;
-    const I2n = nHW*th_eff**3/12        + nHoriz*(th_eff/2-yc_net)**2;
-    items.push({id:'ban',label:'Bot Angles',grossA,netA,yc:h_bcp+ap.centY,
-                ycNet:h_bcp+yc_net,
-                Ixo:ap.ixo*qty,IxoNet:(I1n+I2n)*qty,tension:true,color:'#22c55e',
-                nF:netA/Math.max(grossA,1e-9),
-                note:`${qty}×L${w_eff.toFixed(3)}×${h_eff.toFixed(3)}×(tH=${th_eff.toFixed(3)},tV=${tv_eff.toFixed(3)})"`,
-                apData:ap, qty});
+    // lossL/lossR on component: true (default) = this side gets section loss
+    const makeBanItem_lossL = ban.lossL !== false;
+    const makeBanItem_lossR = ban.lossR !== false;
+    // Helper: build one angle item given whether loss is applied
+    function makeBanItem(side, hasLoss) {
+      const w_e  = hasLoss ? effDim(+ban.w, ban.lossW)  : +ban.w;
+      const h_e  = hasLoss ? effDim(+ban.h, ban.lossHt) : +ban.h;
+      const th_e = hasLoss ? effDim(+ban.t, ban.lossTH) : +ban.t;
+      const tv_e = hasLoss ? effDim(+ban.t, ban.lossTV) : +ban.t;
+      const ap   = calcAngleProps(w_e, h_e, +ban.t, th_e, tv_e);
+      const grossA = ap.area;
+      const A_vert     = tv_e * h_e;
+      const b85H = is85(w_e - tv_e);
+      const b85V = is85Web(h_e);
+      const h_vnet     = netWidthWeb(h_e);
+      const A_vert_net = tv_e * h_vnet;
+      const nHW        = netWidth(w_e - tv_e);
+      const nHoriz     = nHW * th_e;
+      const netA       = A_vert_net + nHoriz;
+      const yc_net     = netA>0 ? (A_vert_net*(h_vnet/2)+nHoriz*(th_e/2))/netA : 0;
+      const I1n = tv_e*h_vnet**3/12 + A_vert_net*(h_vnet/2-yc_net)**2;
+      const I2n = nHW*th_e**3/12    + nHoriz*(th_e/2-yc_net)**2;
+      const lbl = hasLoss ? `Bot Angle ${side}` : `Bot Angle ${side} (nominal)`;
+      return {id:`ban_${side.toLowerCase()}`,label:lbl,grossA,netA,
+              yc:h_bcp+ap.centY, ycNet:h_bcp+yc_net,
+              Ixo:ap.ixo, IxoNet:I1n+I2n, tension:true, color:'#22c55e',
+              net85:b85H||b85V, net85H:b85H, net85V:b85V,
+              nF:netA/Math.max(grossA,1e-9), hasLoss,
+              note:`L${w_e.toFixed(3)}×${h_e.toFixed(3)}×(tH=${th_e.toFixed(3)},tV=${tv_e.toFixed(3)})"`,
+              apData:ap};
+    }
+    items.push(makeBanItem('L', makeBanItem_lossL));
+    items.push(makeBanItem('R', makeBanItem_lossR));
   }
 
   // Bottom web side plates — thickness (lossW) and height (lossHt); web holes on height
@@ -4917,7 +4969,7 @@ function computeAremaSection(z, useInspected) {
       items.push({id:c.id,label:c.id==='bwl'?'Bot WSP L':'Bot WSP R',
                   grossA:t_eff*h_eff, netA:t_eff*h_net, yc,
                   Ixo:t_eff*h_eff**3/12, IxoNet:t_eff*h_net**3/12,
-                  tension:true, color:'#a855f7', nF,
+                  tension:true, color:'#a855f7', net85:is85Web(h_eff), nF,
                   note:`${t_eff.toFixed(3)}"×${h_eff.toFixed(3)}" (net h=${h_net.toFixed(3)}")`});
     }
   }
@@ -4943,32 +4995,37 @@ function computeAremaSection(z, useInspected) {
     }
   }
 
-  // Top angles — legs from tip (lossW, lossHt); H-leg thickness (lossTH); V-leg thickness (lossTV)
+  // Top angles — split L/R for asymmetric section loss support
   if (tan_.on && tan_.w>0 && tan_.h>0 && tan_.t>0) {
-    const qty    = tan_.qty||2;
-    const w_eff  = effDim(+tan_.w, tan_.lossW);    // H-leg length from free tip
-    const h_eff  = effDim(+tan_.h, tan_.lossHt);   // V-leg length from free tip
-    const th_eff = effDim(+tan_.t, tan_.lossTH);   // H-leg effective thickness
-    const tv_eff = effDim(+tan_.t, tan_.lossTV);   // V-leg effective thickness
-    const ap     = calcAngleProps(w_eff, h_eff, +tan_.t, th_eff, tv_eff);
-    items.push({id:'tan',label:'Top Angles',grossA:ap.area*qty,netA:ap.area*qty,
-                yc:totalDepth-h_tcp-ap.centY,Ixo:ap.ixo*qty,tension:false,
-                color:'#22c55e',nF:1,
-                note:`${qty}×L${w_eff.toFixed(3)}×${h_eff.toFixed(3)}×(tH=${th_eff.toFixed(3)},tV=${tv_eff.toFixed(3)})"`,
-                apData:ap,qty});
+    const tanLossL = tan_.lossL !== false;
+    const tanLossR = tan_.lossR !== false;
+    function makeTanItem(side, hasLoss) {
+      const w_e  = hasLoss ? effDim(+tan_.w, tan_.lossW)  : +tan_.w;
+      const h_e  = hasLoss ? effDim(+tan_.h, tan_.lossHt) : +tan_.h;
+      const th_e = hasLoss ? effDim(+tan_.t, tan_.lossTH) : +tan_.t;
+      const tv_e = hasLoss ? effDim(+tan_.t, tan_.lossTV) : +tan_.t;
+      const ap   = calcAngleProps(w_e, h_e, +tan_.t, th_e, tv_e);
+      return {id:`tan_${side.toLowerCase()}`,label:hasLoss?`Top Angle ${side}`:`Top Angle ${side} (nominal)`,
+              grossA:ap.area, netA:ap.area, yc:totalDepth-h_tcp-ap.centY,
+              Ixo:ap.ixo, tension:false, color:'#22c55e', nF:1, hasLoss,
+              note:`L${w_e.toFixed(3)}×${h_e.toFixed(3)}×(tH=${th_e.toFixed(3)},tV=${tv_e.toFixed(3)})"`,
+              apData:ap};
+    }
+    items.push(makeTanItem('L', tanLossL));
+    items.push(makeTanItem('R', tanLossR));
   }
 
   // Top cover plates — width (lossW) and thickness (lossHt) may corrode
   if (tcp.on && tcp.t>0) {
     const qty   = tcp.qty||1;
     const w_eff = effDim(+tcp.w, tcp.lossW);
-    const t_eff = effDim(+tcp.t, tcp.lossHt);   // H/t col → thickness
-    const h_nom = +tcp.t * qty;
-    const h_eff = t_eff * qty;
+    const h_nom = +tcp.t * qty;                  // total nominal height
+    const h_eff = effDim(h_nom, tcp.lossHt);    // loss on TOTAL stack (outer plate only)
+    const t_eff = h_eff / qty;                   // effective per-plate for display
     items.push({id:'tcp',label:'Top Cover Plates',grossA:w_eff*h_eff,netA:w_eff*h_eff,
                 yc:totalDepth-h_nom/2,Ixo:w_eff*h_eff**3/12,tension:false,
                 color:'#3b82f6',nF:1,
-                note:`${qty}pl × ${w_eff.toFixed(3)}"×${t_eff.toFixed(3)}"`});
+                note:`${qty}pl × ${w_eff.toFixed(3)}"×${h_eff.toFixed(3)}" total (${t_eff.toFixed(3)}" ea)`});
   }
 
   // ── GROSS section ──────────────────────────────────────────────────────────
@@ -4998,7 +5055,8 @@ function computeAremaSection(z, useInspected) {
 
   // ── NET section ───────────────────────────────────────────────────────────
   const totAn = items.reduce((s,i)=>s+i.netA, 0);
-  const ybN   = totAn>0 ? items.reduce((s,i)=>s+i.netA*i.yc,0)/totAn : 0;
+  // ybN: use net centroid (ycNet) for items where holes shift centroid (e.g. BAN)
+  const ybN   = totAn>0 ? items.reduce((s,i)=>s+i.netA*(i.ycNet??i.yc),0)/totAn : 0;
   let IxN=0; items.forEach(i=>{
     // Use net centroid (ycNet) for parallel axis if available — bottom angles shift centroid with holes/loss
     const ycRef = i.ycNet ?? i.yc;
@@ -5015,7 +5073,7 @@ function computeAremaSection(z, useInspected) {
   let Iyc=0, Ac=0;
 
   if (tcp.on && tcp.t>0) {                       // Top cover plate — Iy about web CL
-    const w_eff=effDim(+tcp.w,tcp.lossW), hS=effDim(+tcp.t,tcp.lossHt)*(tcp.qty||1);
+    const w_eff=effDim(+tcp.w,tcp.lossW), hS=effDim(+tcp.t*(tcp.qty||1),tcp.lossHt); // total height loss
     Iyc+=hS*w_eff**3/12; Ac+=w_eff*hS;
   }
   const twsp_eff = Math.max(
@@ -5028,12 +5086,19 @@ function computeAremaSection(z, useInspected) {
       Iyc+=wsp.h*w_eff**3/12+w_eff*wsp.h*dCL**2; Ac+=w_eff*wsp.h;
     }
   }
-  if (tan_.on&&tan_.w>0&&tan_.h>0&&tan_.t>0) {   // Top angles — two thickness losses
-    const w_eff=effDim(+tan_.w,tan_.lossW), h_eff=effDim(+tan_.h,tan_.lossHt);
-    const th_eff=effDim(+tan_.t,tan_.lossTH), tv_eff=effDim(+tan_.t,tan_.lossTV);
-    const ap=calcAngleProps(w_eff,h_eff,+tan_.t,th_eff,tv_eff);
-    const dCL=tw_eff/2+twsp_eff+ap.centX;
-    Iyc+=(tan_.qty||2)*(ap.iyo+ap.area*dCL**2); Ac+=ap.area*(tan_.qty||2);
+  if (tan_.on&&tan_.w>0&&tan_.h>0&&tan_.t>0) {   // Top angles — L and R computed independently for lossL/lossR
+    const tanIycL = tan_.lossL !== false;
+    const tanIycR = tan_.lossR !== false;
+    for (const hasL of [tanIycL, tanIycR]) {  // iterate once per angle (L then R)
+      const w_e  = hasL ? effDim(+tan_.w,tan_.lossW)  : +tan_.w;
+      const h_e  = hasL ? effDim(+tan_.h,tan_.lossHt) : +tan_.h;
+      const th_e = hasL ? effDim(+tan_.t,tan_.lossTH) : +tan_.t;
+      const tv_e = hasL ? effDim(+tan_.t,tan_.lossTV) : +tan_.t;
+      const ap   = calcAngleProps(w_e,h_e,+tan_.t,th_e,tv_e);
+      const dCL  = tw_eff/2+twsp_eff+ap.centX;
+      Iyc += ap.iyo+ap.area*dCL**2;
+      Ac  += ap.area;
+    }
   }
   const Iyc_flange=Iyc, Ac_flange=Ac;
 
@@ -5150,7 +5215,7 @@ function aremaGirderSVG(z, sec) {
   const ban_on = ban.on && ban.w>0 && ban.h>0 && ban.t>0;
   const ban_htw   = tw/2;
   const ban_wspOff= (bwl.on&&bwl.w>0)?+bwl.w:0;
-  const ban_bwE   = ban_on ? effD(+ban.w, ban.lossW) : 0;
+  const ban_bwE   = ban_on ? effD(+ban.w, ban.lossW) : 0;  // effective (corroded) — used for loss side only
   const ban_bhE   = ban_on ? effD(+ban.h, ban.lossHt) : 0;
   const ban_thE   = ban_on ? effD(+ban.t, ban.lossTH) : 0;
   const ban_tvE   = ban_on ? effD(+ban.t, ban.lossTV) : 0;
@@ -5167,7 +5232,8 @@ function aremaGirderSVG(z, sec) {
   // ── Bottom cover plates ───────────────────────────────────────────────────
   if (bcp.on && bcp.t>0) {
     const wN=+(bcp.w||18), qty=bcp.qty||1;
-    const wE=effD(wN, bcp.lossW), tE=effD(+bcp.t, bcp.lossHt), hE=tE*qty;
+    const wE=effD(wN, bcp.lossW);
+    const hE=effD(h_bcp, bcp.lossHt);  // loss on total stack height, not per-plate
     if (lossSL && (wE<wN || hE<h_bcp)) DASH(-wN/2,0,wN,h_bcp);
     R(-wE/2, h_bcp-hE, wE, hE,'#3b82f6');  // inner(top) face fixed; outer(bottom) corrodes
     // Flange holes: n per side, evenly spaced across the outstanding leg
@@ -5190,23 +5256,37 @@ function aremaGirderSVG(z, sec) {
     }
   }
 
-  // ── Bottom angles ─────────────────────────────────────────────────────────
+  // ── Bottom angles — respect lossL/lossR flags for which side gets dashes ──
   if (ban_on) {
-    const btN=+ban.t;
-    // Section loss dashes
-    if (lossSL) {
-      DASH(-ban_htw-ban_wspOff-btN,  h_bcp, -btN,          +ban.h);
-      DASH(-ban_htw-ban_wspOff-+ban.w, h_bcp, -(+ban.w-btN), btN);
-      DASH( ban_htw+ban_wspOff,       h_bcp,  btN,          +ban.h);
-      DASH( ban_htw+ban_wspOff+btN,   h_bcp,  +ban.w-btN,   btN);
+    const btN = +ban.t;
+    const banLP_L = ban.lossL !== false;  // left angle gets loss
+    const banLP_R = ban.lossR !== false;  // right angle gets loss
+    // Nominal dims for non-corroded side
+    const ban_bwN = +ban.w, ban_bhN = +ban.h;
+    // Section loss dashes — only on the side(s) with loss
+    const dashL = lossSL && banLP_L;
+    const dashR = lossSL && banLP_R;
+    if (dashL) {
+      DASH(-ban_htw-ban_wspOff-btN,    h_bcp, -btN,           ban_bhN);
+      DASH(-ban_htw-ban_wspOff-ban_bwN, h_bcp, -(ban_bwN-btN), btN);
     }
-    // Effective fills
-    R(-ban_htw-ban_wspOff-ban_tvE, h_bcp, -ban_tvE,           ban_bhE, '#22c55e');
-    R(-ban_htw-ban_wspOff-ban_bwE, h_bcp, -(ban_bwE-ban_tvE), ban_thE, '#22c55e');
-    R( ban_htw+ban_wspOff,         h_bcp,  ban_tvE,           ban_bhE, '#22c55e');
-    R( ban_htw+ban_wspOff+ban_tvE, h_bcp,  ban_bwE-ban_tvE,   ban_thE, '#22c55e');
-    // NOTE: holes drawn combined with BCP above (flange) and with WSP/web below (web)
-    // Web holes on V-leg: drawn as part of the continuous web bolt (see below)
+    if (dashR) {
+      DASH( ban_htw+ban_wspOff,         h_bcp,  btN,           ban_bhN);
+      DASH( ban_htw+ban_wspOff+btN,     h_bcp,  ban_bwN-btN,   btN);
+    }
+    // Effective fills — use effective dims for affected side, nominal for unaffected
+    const bwL = banLP_L ? ban_bwE : ban_bwN;   // left side: effective if loss, nominal otherwise
+    const bhL = banLP_L ? ban_bhE : ban_bhN;
+    const thL = banLP_L ? ban_thE : btN;
+    const tvL = banLP_L ? ban_tvE : btN;
+    const bwR = banLP_R ? ban_bwE : ban_bwN;   // right side: effective if loss
+    const bhR = banLP_R ? ban_bhE : ban_bhN;
+    const thR = banLP_R ? ban_thE : btN;
+    const tvR = banLP_R ? ban_tvE : btN;
+    R(-ban_htw-ban_wspOff-tvL, h_bcp, -tvL,       bhL, '#22c55e');
+    R(-ban_htw-ban_wspOff-bwL, h_bcp, -(bwL-tvL), thL, '#22c55e');
+    R( ban_htw+ban_wspOff,     h_bcp,  tvR,        bhR, '#22c55e');
+    R( ban_htw+ban_wspOff+tvR, h_bcp,  bwR-tvR,    thR, '#22c55e');
   }
 
   // ── Bottom web side plates ────────────────────────────────────────────────
@@ -5257,31 +5337,41 @@ function aremaGirderSVG(z, sec) {
     R(tw/2, h_bcp+gap+hw-thE, twE, thE, '#a855f7');
   }
 
-  // ── Top angles ────────────────────────────────────────────────────────────
+  // ── Top angles — respect lossL/lossR for asymmetric section loss ───────────
   if (tan_.on&&tan_.w>0&&tan_.h>0&&tan_.t>0) {
     const twN=+tan_.w, thN=+tan_.h, ttN=+tan_.t, htw=tw/2;
     const wsp_off=(twl.on&&twl.w>0)?+twl.w:0;
     const twE=effD(twN,tan_.lossW), thE=effD(thN,tan_.lossHt);
     const thHe=effD(ttN,tan_.lossTH), tvHe=effD(ttN,tan_.lossTV);
-    const tanBot=totalDepth-h_tcp-thE;
-    if (lossSL) {
-      DASH(-htw-wsp_off-ttN, totalDepth-h_tcp-thN, -ttN, thN);
+    const tanLossL = tan_.lossL !== false;
+    const tanLossR = tan_.lossR !== false;
+    const dashTL = lossSL && tanLossL;
+    const dashTR = lossSL && tanLossR;
+    // Left side: use effective if has loss, nominal otherwise
+    const twEL = tanLossL ? twE : twN, thEL = tanLossL ? thE : thN;
+    const thHL = tanLossL ? thHe : ttN, tvHL = tanLossL ? tvHe : ttN;
+    // Right side
+    const twER = tanLossR ? twE : twN, thER = tanLossR ? thE : thN;
+    const thHR = tanLossR ? thHe : ttN, tvHR = tanLossR ? tvHe : ttN;
+    if (dashTL) {
+      DASH(-htw-wsp_off-ttN, totalDepth-h_tcp-thN, -ttN,      thN);
       DASH(-htw-wsp_off-twN, totalDepth-h_tcp-ttN, -(twN-ttN), ttN);
     }
-    R(-htw-wsp_off-tvHe, tanBot,           -tvHe,       thE,  '#22c55e');
-    R(-htw-wsp_off-twE,  totalDepth-h_tcp-thHe, -(twE-tvHe), thHe, '#22c55e');
-    if (lossSL) {
-      DASH(htw+wsp_off,        totalDepth-h_tcp-thN, ttN,       thN);
-      DASH(htw+wsp_off+ttN,    totalDepth-h_tcp-ttN, twN-ttN,   ttN);
+    R(-htw-wsp_off-tvHL, totalDepth-h_tcp-thEL,       -tvHL,       thEL, '#22c55e');
+    R(-htw-wsp_off-twEL, totalDepth-h_tcp-thHL, -(twEL-tvHL), thHL, '#22c55e');
+    if (dashTR) {
+      DASH(htw+wsp_off,     totalDepth-h_tcp-thN, ttN,       thN);
+      DASH(htw+wsp_off+ttN, totalDepth-h_tcp-ttN, twN-ttN,   ttN);
     }
-    R(htw+wsp_off,           tanBot,           tvHe,       thE,  '#22c55e');
-    R(htw+wsp_off+tvHe,      totalDepth-h_tcp-thHe, twE-tvHe,   thHe, '#22c55e');
+    R(htw+wsp_off,      totalDepth-h_tcp-thER,  tvHR,       thER, '#22c55e');
+    R(htw+wsp_off+tvHR, totalDepth-h_tcp-thHR,  twER-tvHR,  thHR, '#22c55e');
   }
 
   // ── Top cover plates ──────────────────────────────────────────────────────
   if (tcp.on&&tcp.t>0) {
     const wN=+(tcp.w||18), qty=tcp.qty||1;
-    const wE=effD(wN,tcp.lossW), tE=effD(+tcp.t,tcp.lossHt), hE=tE*qty;
+    const wE=effD(wN,tcp.lossW);
+    const hE=effD(h_tcp, tcp.lossHt);  // loss on total stack height, not per-plate
     const yBot=totalDepth-h_tcp;
     if (lossSL&&(wE<wN||hE<h_tcp)) DASH(-wN/2, yBot, wN, h_tcp);
     R(-wE/2, yBot, wE, hE, '#3b82f6');  // inner(bottom) face fixed; outer(top) face corrodes
@@ -6275,7 +6365,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
     const SFT      = AREMA_SFT[fatCat] ?? 6;
     const fatAlpha = +(R2.arema_fatAlpha ?? 0.85);  // live load reduction (≤12 ksi condition)
     const fatBeta  = +(R2.arema_fatBeta  ?? 0.15);  // fatigue impact factor (AREMA Table 15-7-1)
-    const I_fat    = 1 + fatBeta * (iBase + I_rock); // fatigue (1+I) = 1 + β×(base+rocking)
+    const I_fat    = 1 + fatBeta * ballastF * (iBase + I_rock); // fatigue (1+I): β and ballast factor both apply
 
     return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,longLC,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
             n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,H_CF,
@@ -6285,7 +6375,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
             longLC,long_L_ref,F_brake_act,F_tract_act,F_long_act,long_governs_act,
             F_brake_ref,F_tract_ref,F_long_ref,long_mult,
             e_track,DF_calc,
-            curveR,curveV,fatCat,SFT,fatAlpha,fatBeta,I_fat,dlFactor};
+            curveR,curveV,fatCat,SFT,fatAlpha,fatBeta,I_fat,dlFactor,ballastF};
   })();
 
   const aremaAsdData = useMemo(()=>{
@@ -9931,7 +10021,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                      longLC,long_L_ref,F_brake_act,F_tract_act,F_long_act,long_governs_act,
                      F_brake_ref,F_tract_ref,F_long_ref,long_mult,
                      e_track,DF_calc,
-                     curveR,curveV,fatCat,SFT} = _aremaParams;
+                     curveR,curveV,fatCat,SFT,dlFactor} = _aremaParams;
               const aremaDcLC = R2.arema_dcLC || ratingDcLC  || '';
               const aremaLlLC = R2.arema_llLC || ratingLLposLC || '';
               const hasAremaZone = hasAremaAnywhere;
@@ -10256,11 +10346,11 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           Fatigue Impact I_fat
                         </div>
                         <div style={{fontSize:'14px',fontWeight:'800',fontFamily:'monospace',color:'#7e22ce'}}>
-                          {(1 + fatBeta*(iBase+I_rock)).toFixed(4)}
+                          {(1 + fatBeta*ballastF*(iBase+I_rock)).toFixed(4)}
                         </div>
                         <div style={{fontSize:'7.5px',fontFamily:'monospace',color:'#9ca3af',marginTop:'3px',lineHeight:'1.4'}}>
                           1 + β×(i_base+I_rock)<br/>
-                          = 1 + {fatBeta}×({iBase.toFixed(4)}+{I_rock.toFixed(4)})<br/>
+                          = 1 + {fatBeta}×{ballastF.toFixed(1)}×({iBase.toFixed(4)}+{I_rock.toFixed(4)})<br/>
                           dM_fat = α×(dM/f1pI×I_fat + M_CF)
                         </div>
                       </div>
@@ -10401,6 +10491,33 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   </div>
                   )}
                   {/* MAXIMUM */}
+                    {(()=>{
+                      const _cx=aremaCalcX!==''&&aremaCalcX!=null?parseFloat(aremaCalcX):null;
+                      if(_cx==null||!aremaAsdData.length) return null;
+                      const _d=aremaAsdData;
+                      let li=_d.length-1;
+                      for(let i=0;i<_d.length;i++){if(_d[i].pos>_cx){li=i-1;break;}}
+                      li=Math.max(0,Math.min(li,_d.length-2));
+                      const L=_d[li],R=_d[li+1]||_d[li];
+                      const t=R.pos===L.pos?0:(_cx-L.pos)/(R.pos-L.pos);
+                      const lp=(a,b)=>(a==null||b==null)?(a??b):a+t*(b-a);
+                      const near=Math.abs(L.pos-_cx)<Math.abs(R.pos-_cx)?L:R;
+                      const rf='gN';
+                      const rfv=Math.abs(L.pos-_cx)<0.1?L[rf]:Math.abs(R.pos-_cx)<0.1?R[rf]:lp(L[rf],R[rf]);
+                      if(rfv==null) return null;
+                      return (
+                        <div style={{marginTop:'8px',paddingTop:'8px',borderTop:'1px dashed #f59e0b',
+                          display:'flex',alignItems:'center',gap:'8px'}}>
+                          <span style={{fontSize:'9px',fontFamily:'monospace',color:'#b45309',fontWeight:'600'}}>
+                            📍 @ {_cx.toFixed(2)} ft:
+                          </span>
+                          <span style={{fontSize:'18px',fontWeight:'800',fontFamily:'monospace',
+                            color:rfv>=1?'#15803d':'#dc2626'}}>{rfv.toFixed(3)}</span>
+                          <span style={{fontSize:'8px',fontFamily:'monospace',fontWeight:'700',
+                            color:rfv>=1?'#15803d':'#dc2626'}}>{rfv>=1?'PASS':'FAIL'}</span>
+                        </div>
+                      );
+                    })()}
                   {govAsdX&&(
                   <div style={{padding:'14px 18px',background:'#fff7ed',border:'2px solid #ea580c',borderRadius:'8px'}}>
                     <div style={{fontSize:'10px',fontFamily:'monospace',color:'#c2410c',fontWeight:'600',marginBottom:'6px'}}>
@@ -10424,6 +10541,33 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   </div>
                   )}
                   {/* MODIFIED */}
+                    {(()=>{
+                      const _cx=aremaCalcX!==''&&aremaCalcX!=null?parseFloat(aremaCalcX):null;
+                      if(_cx==null||!aremaAsdData.length) return null;
+                      const _d=aremaAsdData;
+                      let li=_d.length-1;
+                      for(let i=0;i<_d.length;i++){if(_d[i].pos>_cx){li=i-1;break;}}
+                      li=Math.max(0,Math.min(li,_d.length-2));
+                      const L=_d[li],R=_d[li+1]||_d[li];
+                      const t=R.pos===L.pos?0:(_cx-L.pos)/(R.pos-L.pos);
+                      const lp=(a,b)=>(a==null||b==null)?(a??b):a+t*(b-a);
+                      const near=Math.abs(L.pos-_cx)<Math.abs(R.pos-_cx)?L:R;
+                      const rf='gX';
+                      const rfv=Math.abs(L.pos-_cx)<0.1?L[rf]:Math.abs(R.pos-_cx)<0.1?R[rf]:lp(L[rf],R[rf]);
+                      if(rfv==null) return null;
+                      return (
+                        <div style={{marginTop:'8px',paddingTop:'8px',borderTop:'1px dashed #f59e0b',
+                          display:'flex',alignItems:'center',gap:'8px'}}>
+                          <span style={{fontSize:'9px',fontFamily:'monospace',color:'#b45309',fontWeight:'600'}}>
+                            📍 @ {_cx.toFixed(2)} ft:
+                          </span>
+                          <span style={{fontSize:'18px',fontWeight:'800',fontFamily:'monospace',
+                            color:rfv>=1?'#c2410c':'#dc2626'}}>{rfv.toFixed(3)}</span>
+                          <span style={{fontSize:'8px',fontFamily:'monospace',fontWeight:'700',
+                            color:rfv>=1?'#c2410c':'#dc2626'}}>{rfv>=1?'PASS':'FAIL'}</span>
+                        </div>
+                      );
+                    })()}
                   {govAsdM&&(
                   <div style={{padding:'14px 18px',background:'#fffbeb',border:'2px solid #d97706',borderRadius:'8px'}}>
                     <div style={{fontSize:'10px',fontFamily:'monospace',color:'#92400e',fontWeight:'600',marginBottom:'6px'}}>
@@ -10447,6 +10591,33 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   </div>
                   )}
                   {/* FATIGUE */}
+                    {(()=>{
+                      const _cx=aremaCalcX!==''&&aremaCalcX!=null?parseFloat(aremaCalcX):null;
+                      if(_cx==null||!aremaAsdData.length) return null;
+                      const _d=aremaAsdData;
+                      let li=_d.length-1;
+                      for(let i=0;i<_d.length;i++){if(_d[i].pos>_cx){li=i-1;break;}}
+                      li=Math.max(0,Math.min(li,_d.length-2));
+                      const L=_d[li],R=_d[li+1]||_d[li];
+                      const t=R.pos===L.pos?0:(_cx-L.pos)/(R.pos-L.pos);
+                      const lp=(a,b)=>(a==null||b==null)?(a??b):a+t*(b-a);
+                      const near=Math.abs(L.pos-_cx)<Math.abs(R.pos-_cx)?L:R;
+                      const rf='gM';
+                      const rfv=Math.abs(L.pos-_cx)<0.1?L[rf]:Math.abs(R.pos-_cx)<0.1?R[rf]:lp(L[rf],R[rf]);
+                      if(rfv==null) return null;
+                      return (
+                        <div style={{marginTop:'8px',paddingTop:'8px',borderTop:'1px dashed #f59e0b',
+                          display:'flex',alignItems:'center',gap:'8px'}}>
+                          <span style={{fontSize:'9px',fontFamily:'monospace',color:'#b45309',fontWeight:'600'}}>
+                            📍 @ {_cx.toFixed(2)} ft:
+                          </span>
+                          <span style={{fontSize:'18px',fontWeight:'800',fontFamily:'monospace',
+                            color:rfv>=1?'#92400e':'#dc2626'}}>{rfv.toFixed(3)}</span>
+                          <span style={{fontSize:'8px',fontFamily:'monospace',fontWeight:'700',
+                            color:rfv>=1?'#92400e':'#dc2626'}}>{rfv>=1?'PASS':'FAIL'}</span>
+                        </div>
+                      );
+                    })()}
                   {govAsdFat&&(
                   <div style={{padding:'14px 18px',background:'#fdf4ff',border:'2px solid #a855f7',borderRadius:'8px'}}>
                     <div style={{fontSize:'10px',fontFamily:'monospace',color:'#7e22ce',fontWeight:'600',marginBottom:'6px'}}>
@@ -10464,6 +10635,41 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     <div style={{marginTop:'5px',fontSize:'9px',fontFamily:'monospace',fontWeight:'600',color:govAsdFat.rfFat>=1?'#7e22ce':'#dc2626'}}>
                       {govAsdFat.rfFat>=1?'✅ PASS':'❌ STRESS RANGE EXCEEDED'}
                     </div>
+                    {govAsdFat.fatAlphaFlag&&(
+                      <div style={{marginTop:'4px',fontSize:'8.5px',fontFamily:'monospace',color:'#b45309',fontWeight:'600'}}>
+                        ⚠ α applied but SR_no_α = {govAsdFat.SR_no_alpha?.toFixed(2)} ksi &gt; 12 ksi — verify α condition
+                      </div>
+                    )}
+                    {(()=>{
+                      const _cx=aremaCalcX!==''&&aremaCalcX!=null?parseFloat(aremaCalcX):null;
+                      if(_cx==null||!aremaAsdData.length) return null;
+                      const _d=aremaAsdData;
+                      let li=_d.length-1;
+                      for(let i=0;i<_d.length;i++){if(_d[i].pos>_cx){li=i-1;break;}}
+                      li=Math.max(0,Math.min(li,_d.length-2));
+                      const L=_d[li],R=_d[li+1]||_d[li];
+                      const t=R.pos===L.pos?0:(_cx-L.pos)/(R.pos-L.pos);
+                      const lp=(a,b)=>(a==null||b==null)?(a??b):a+t*(b-a);
+                      const near=Math.abs(L.pos-_cx)<Math.abs(R.pos-_cx)?L:R;
+                      const rf='rfFat';
+                      const rfv=Math.abs(L.pos-_cx)<0.1?L[rf]:Math.abs(R.pos-_cx)<0.1?R[rf]:lp(L[rf],R[rf]);
+                      if(rfv==null) return null;
+                      return (
+                        <div style={{marginTop:'8px',paddingTop:'8px',borderTop:'1px dashed #f59e0b',
+                          display:'flex',alignItems:'center',gap:'8px'}}>
+                          <span style={{fontSize:'9px',fontFamily:'monospace',color:'#b45309',fontWeight:'600'}}>
+                            📍 @ {_cx.toFixed(2)} ft:
+                          </span>
+                          <span style={{fontSize:'18px',fontWeight:'800',fontFamily:'monospace',
+                            color:rfv>=1?'#7e22ce':'#dc2626'}}>{rfv.toFixed(3)}</span>
+                          <span style={{fontSize:'8px',fontFamily:'monospace',fontWeight:'700',
+                            color:rfv>=1?'#7e22ce':'#dc2626'}}>{rfv>=1?'PASS':'FAIL'}</span>
+                        </div>
+                      );
+                    })()}
+                    <div style={{marginTop:'4px',fontSize:'8px',fontFamily:'monospace',color:'#9ca3af'}}>
+                      α={+(R2.arema_fatAlpha??0.85).toFixed(2)} · β={+(R2.arema_fatBeta??0.15).toFixed(2)} · I_fat={(1+(+(R2.arema_fatBeta??0.15))*(iBase+I_rock)).toFixed(4)}
+                    </div>
                   </div>
                   )}
                 </div>
@@ -10472,6 +10678,10 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                 {aremaMultiData.length>0&&(()=>{
                   const {n_gird,S_gird} = _aremaParams;
                   const totalLen = (cfg?.spans||[]).reduce((a,b)=>a+b,0);
+                  // Use AREMA span (most accurate) → geometry spans → max node position
+                  const maxNodePos = aremaAsdData.length ? Math.max(...aremaAsdData.map(d=>d.pos)) : 0;
+                  const aSpan = _aremaParams?.span || totalLen || maxNodePos;
+                  const midPos = aSpan / 2;
                   const flt = v=>v!=null&&isFinite(v)&&v>-9999;
                   const f1 = v=>flt(v)?v.toFixed(1):'—';
 
@@ -10507,17 +10717,25 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
 
                   // Locations: support (shear), midspan, each zone boundary
                   // Each zone boundary shows as BOTH flexure and shear
-                  const summaryLocs = (cfg?.rating?.arema_summary_locs?.length
-                    ? cfg.rating.arema_summary_locs
-                    : [
-                        {id:'mid',  label:'0.5L (MIDSPAN)',     pos:totalLen/2, mechs:['FLEXURE']},
-                        {id:'sup',  label:'SHEAR AT SUPPORT',   pos:0,          mechs:['SHEAR']},
-                        ...zoneBounds.map((x,i)=>({
-                          id:'z'+i, label:`COVER PL. ${i+1}`, pos:x,
-                          mechs: ['FLEXURE'],   // shear only checked at support per AREMA §15
-                        })),
-                      ]
-                  );
+                  const summaryLocs = (()=>{
+                    const base = cfg?.rating?.arema_summary_locs?.length
+                      ? [...cfg.rating.arema_summary_locs]
+                      : [
+                          {id:'sup', label:'SHEAR AT SUPPORT', pos:0,      mechs:['SHEAR']},
+                          ...zoneBounds.map((x,i)=>({
+                            id:'z'+i, label:`COVER PL. ${i+1}`, pos:x,
+                            mechs:['FLEXURE'],
+                          })),
+                        ];
+                    // Always include midspan — use AREMA span for accuracy
+                    const hasMid = midPos>0.5 && base.some(l=>Math.abs(l.pos-midPos)<0.5);
+                    if (midPos>0.5 && !hasMid) {
+                      base.push({id:'mid', label:`0.5L (MIDSPAN @ ${midPos.toFixed(2)} ft)`,
+                                 pos:midPos, mechs:['FLEXURE']});
+                      base.sort((a,b)=>a.pos-b.pos);
+                    }
+                    return base;
+                  })();
 
                   // Vehicles: exclude longitudinal (refSpan defined — used only for long. load component)
                   const isLong = v => ALL_VEHICLES.find(av=>av.name===v.name)?.refSpan !== undefined;
@@ -10724,6 +10942,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   const f3   = v=>v!=null&&isFinite(v)?v.toFixed(3):'—';
                   const f2s  = v=>v!=null&&isFinite(v)?v.toFixed(2):'—';
                   const fS   = (M,Sx)=>(M&&Sx&&isFinite(M)&&isFinite(Sx))?f2s(M*12/Sx):'—';
+                  const flt  = v=>v!=null&&isFinite(v)&&v>-9999;
                   const THdr = ({cols,bg,tc}) => (
                     <thead><tr style={{background:bg||'#f3f4f6'}}>
                       {cols.map(([lbl,right])=>(
@@ -10733,6 +10952,16 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                       ))}
                     </tr></thead>
                   );
+                  const THdr2 = ({groups,bg,tc}) => {
+                    const thG=(t,span,gbg,gtc)=>`<th colSpan="${span}" style="padding:3px 7px;border:1px solid #e5e7eb;font-size:8pt;font-family:monospace;font-weight:800;background:${gbg||bg};color:${gtc||tc};text-align:center;border-bottom:2px solid #cbd5e1">${t}</th>`;
+                    const thC=(t,cbg)=>`<th style="padding:3px 6px;border:1px solid #e5e7eb;font-size:7.5px;font-family:monospace;font-weight:700;background:${cbg||bg};color:${tc};text-align:center;white-space:nowrap">${t}</th>`;
+                    return (
+                      <thead dangerouslySetInnerHTML={{__html:
+                        '<tr>'+groups.map(g=>thG(g.label,g.cols.length,g.bg,g.tc)).join('')+'</tr>'+
+                        '<tr>'+groups.flatMap(g=>g.cols.map(col=>thC(col,g.colBg))).join('')+'</tr>'
+                      }}/>
+                    );
+                  };
                   const SecHdr = ({icon,title,sub,color,bg,id}) => (
                     <div onClick={id?()=>setCollapsedTbls(prev=>({...prev,[id]:!prev[id]})):undefined}
                       style={{padding:'7px 14px',background:bg,display:'flex',
@@ -10755,15 +10984,70 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     );
                   };
 
-                  const mkRow = (p, isG, cells) => (
-                    <tr key={p.node} style={{background:isG?'#fffde7':'#fff'}}>
-                      <td style={{padding:'3px 7px',border:'1px solid #e5e7eb',fontWeight:isG?700:400,whiteSpace:'nowrap'}}>
-                        {isG&&<span style={{color:'#d97706'}}>★ </span>}N{p.node}
+                  // ── Calc-sheet location: interpolated node ──────────────────
+                  const _xVal2 = aremaCalcX!==''&&aremaCalcX!=null ? parseFloat(aremaCalcX) : null;
+                  const _lerp = (a,b,t) => (a==null||b==null) ? (a??b) : a+t*(b-a);
+                  const calcXData = (()=>{
+                    if (_xVal2==null||!aremaAsdData.length) return null;
+                    const sorted = aremaAsdData;  // already sorted by pos
+                    // Find bounding nodes
+                    let li = sorted.length-1;
+                    for(let i=0;i<sorted.length;i++){if(sorted[i].pos>_xVal2){li=i-1;break;}}
+                    li = Math.max(0, Math.min(li, sorted.length-2));
+                    const L=sorted[li], R=sorted[li+1]||sorted[li];
+                    const t = R.pos===L.pos ? 0 : (_xVal2-L.pos)/(R.pos-L.pos);
+                    // If very close to an existing node, use it directly
+                    if(Math.abs(L.pos-_xVal2)<0.1) return {...L, _isCalcX:true};
+                    if(Math.abs(R.pos-_xVal2)<0.1) return {...R, _isCalcX:true};
+                    // Interpolate all numeric fields
+                    const flds=['MDL','VDL','dM','denomN','denomX','denomM','dV',
+                      'rfcN','rftN','gN','rfcX','rftX','gX','rfcM','rftM','gM',
+                      'rfvN','rfvX','rfvM','rfFat','dM_fat','SR_no_alpha',
+                      'McN','MtN','McX','MtX','VnN','VnX'];
+                    const nd = {pos:_xVal2, node:null, interpolated:true, _isCalcX:true};
+                    flds.forEach(f=>{nd[f]=_lerp(L[f],R[f],t);});
+                    const useL = Math.abs(L.pos-_xVal2)<Math.abs(R.pos-_xVal2);
+                    nd.sec=useL?L.sec:R.sec; nd.allo=useL?L.allo:R.allo;
+                    nd.fatAlphaFlag=useL?L.fatAlphaFlag:R.fatAlphaFlag;
+                    return nd;
+                  })();
+                  // Build augmented data array with interpolated row inserted
+                  const augmentedData = (()=>{
+                    if(!calcXData||!calcXData.interpolated) return aremaAsdData;
+                    const out=[];
+                    let inserted=false;
+                    aremaAsdData.forEach((p,i)=>{
+                      out.push(p);
+                      if(!inserted && _xVal2>p.pos &&
+                         (i===aremaAsdData.length-1||aremaAsdData[i+1].pos>_xVal2)){
+                        out.push(calcXData); inserted=true;
+                      }
+                    });
+                    if(!inserted) out.push(calcXData);
+                    return out;
+                  })();
+
+                  const mkRow = (p, isG, isCalcX, cells) => {
+                    const base = isG?'#fffde7':isCalcX&&!p.interpolated?'#fff':
+                                 p.interpolated?'#fffbeb':'#fff';
+                    const brd = isCalcX ? '2px solid #f59e0b' : undefined;
+                    return (
+                    <tr key={p.node??'ix-'+p.pos} style={{background:base,
+                      outline:brd,outlineOffset:'-1px'}}>
+                      <td style={{padding:'3px 7px',border:'1px solid #e5e7eb',
+                        fontWeight:isG||isCalcX?700:400,whiteSpace:'nowrap',
+                        color:p.interpolated?'#b45309':'inherit'}}>
+                        {isG&&<span style={{color:'#d97706'}}>★ </span>}
+                        {isCalcX&&<span style={{color:'#f59e0b'}}>📍 </span>}
+                        {p.interpolated?`${p.pos.toFixed(2)} ft ↗`:`N${p.node}`}
                       </td>
-                      <td style={{padding:'3px 7px',border:'1px solid #e5e7eb',textAlign:'right'}}>{p.pos.toFixed(2)}</td>
+                      <td style={{padding:'3px 7px',border:'1px solid #e5e7eb',
+                        textAlign:'right',color:p.interpolated?'#b45309':'inherit'}}>
+                        {p.pos.toFixed(2)}
+                      </td>
                       {cells}
-                    </tr>
-                  );
+                    </tr>);
+                  };
                   const TD = (v,{bg,fw,c,fs}={}) => (
                     <td style={{padding:'3px 7px',border:'1px solid #e5e7eb',textAlign:'right',
                       background:bg,fontWeight:fw||400,color:c,fontSize:fs}}>{v}</td>
@@ -10784,29 +11068,32 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         sub={`Fb_N=${govAsdN?.allo?.Fb_N.toFixed(2)} ksi (comp) · Ft_N=${govAsdN?.allo?.Ft_N.toFixed(2)} ksi (tens) · denom = MLL×(1+I)×DF + M_CF`}/>
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
-                        <THdr bg="#f0fdf4" tc="#15803d" cols={[
-                          ['Node'],['Pos(ft)',1],['MDL (ft-k)',1],['denom_N (ft-k)',1],
-                          ['Mc_N = Fb_N×Sx_top/12',1],['RF_comp_N',1],
-                          ['Mt_N = Ft_N×Sx_bot_net/12',1],['RF_tens_N',1],['RF_N ★',1],
-                          ['fDL_top (ksi)',1],['fLL_top (ksi)',1],['Fb_N (ksi)',1],
-                          ['fDL_bot (ksi)',1],['fLL_bot (ksi)',1],['Ft_N (ksi)',1]]}/>
+                        <THdr2 bg="#f0fdf4" tc="#15803d" groups={[
+                          {label:'Location',     cols:['Node','Pos (ft)'],                                              bg:'#f0fdf4'},
+                          {label:'Dead Load',    cols:[dlFactor!==1?`MDL×${dlFactor.toFixed(2)} (ft-k)`:'MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'], bg:'#fafff5',colBg:'#f0fdf4'},
+                          {label:'Live Load',    cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],              bg:'#eff6ff',colBg:'#dbeafe'},
+                          {label:'Capacity',     cols:['Mc_N (ft-k)','Fb_N (ksi)','Mt_N (ft-k)','Ft_N (ksi)'],        bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Rating',       cols:['RF_comp_N','RF_tens_N','RF_N ★','E-Rating (×80)'],             bg:'#dcfce7',colBg:'#bbf7d0',tc:'#065f46'},
+                        ]}/>
                         <tbody>
-                        {aremaAsdData.map(p=>{
-                          const isG=govAsdN?.node===p.node;
-                          return mkRow(p,isG,<>
+                        {augmentedData.map(p=>{
+                          const isG=!p.interpolated&&govAsdN?.node===p.node;
+                          const isCalcX=!!p._isCalcX;
+                          return mkRow(p,isG,isCalcX,<>
                             {TD(f1(p.MDL))}
-                            {TD(f1(p.denomN),{bg:'#f9fafb'})}
-                            {TD(f1(p.McN),{bg:'#f0fdf4'})}
-                            {TD(f3(p.rfcN),{c:rfC(p.rfcN)})}
-                            {TD(f1(p.MtN),{bg:'#f0fdf4'})}
-                            {TD(f3(p.rftN),{c:rfC(p.rftN)})}
-                            {TD(f3(p.gN),{bg:'#dcfce7',fw:700,c:rfC(p.gN)})}
-                            {TD(fS(p.MDL,p.sec?.SxTopG),{bg:'#f0f9ff'})}
-                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#f0f9ff'})}
-                            {TD(p.allo?.Fb_N?.toFixed(2)??'—',{bg:'#dbeafe',fw:700})}
-                            {TD(fS(p.MDL,p.sec?.SxBotN),{bg:'#fff0f9'})}
-                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#fff0f9'})}
-                            {TD(p.allo?.Ft_N?.toFixed(2)??'—',{bg:'#fce7f3',fw:700})}
+                            {TD(fS(p.MDL,p.sec?.SxTopG))}
+                            {TD(fS(p.MDL,p.sec?.SxBotN))}
+                            {TD(f1(p.denomN),{bg:'#dbeafe'})}
+                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#dbeafe'})}
+                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#dbeafe'})}
+                            {TD(f1(p.McN),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Fb_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f1(p.MtN),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Ft_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f3(p.rfcN),{bg:'#bbf7d0',c:rfC(p.rfcN)})}
+                            {TD(f3(p.rftN),{bg:'#bbf7d0',c:rfC(p.rftN)})}
+                            {TD(f3(p.gN),{bg:'#86efac',fw:700,c:rfC(p.gN)})}
+                            {TD(flt(p.gN)?'E-'+(p.gN*80).toFixed(1):'—',{bg:'#4ade80',fw:700,c:rfC(p.gN)})}
                           </>);
                         })}
                         </tbody>
@@ -10825,29 +11112,32 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         sub={`K=0.80Fy · Fb_X=${govAsdX?.allo?.Fb_X.toFixed(2)} ksi (K-factor LTB) · same denom as Normal · no wind/rock`}/>
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
-                        <THdr bg="#fff7ed" tc="#c2410c" cols={[
-                          ['Node'],['Pos(ft)',1],['MDL (ft-k)',1],['denom_N (ft-k)',1],
-                          ['Mc_X = Fb_X×Sx_top/12',1],['RF_comp_X',1],
-                          ['Mt_X = Ft_X×Sx_bot_net/12',1],['RF_tens_X',1],['RF_X ★',1],
-                          ['fDL_top (ksi)',1],['fLL_top (ksi)',1],['Fb_X (ksi)',1],
-                          ['fDL_bot (ksi)',1],['fLL_bot (ksi)',1],['Ft_X (ksi)',1]]}/>
+                        <THdr2 bg="#fff7ed" tc="#c2410c" groups={[
+                          {label:'Location',  cols:['Node','Pos (ft)'],                                   bg:'#fff7ed'},
+                          {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],       bg:'#fefce8',colBg:'#fff7ed'},
+                          {label:'Live Load', cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],   bg:'#fff1e6',colBg:'#fed7aa'},
+                          {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Rating',    cols:['RF_comp_X','RF_tens_X','RF_X ★','E-Rating (×80)'],  bg:'#fed7aa',colBg:'#fdba74',tc:'#7c2d12'},
+                        ]}/>
                         <tbody>
-                        {aremaAsdData.map(p=>{
-                          const isG=govAsdX?.node===p.node;
-                          return mkRow(p,isG,<>
+                        {augmentedData.map(p=>{
+                          const isG=!p.interpolated&&govAsdX?.node===p.node;
+                          const isCalcX=!!p._isCalcX;
+                          return mkRow(p,isG,isCalcX,<>
                             {TD(f1(p.MDL))}
-                            {TD(f1(p.denomN),{bg:'#f9fafb'})}
-                            {TD(f1(p.McX),{bg:'#fff7ed'})}
-                            {TD(f3(p.rfcX),{c:rfC(p.rfcX)})}
-                            {TD(f1(p.MtX),{bg:'#fff7ed'})}
-                            {TD(f3(p.rftX),{c:rfC(p.rftX)})}
-                            {TD(f3(p.gX),{bg:'#fed7aa',fw:700,c:rfC(p.gX)})}
-                            {TD(fS(p.MDL,p.sec?.SxTopG),{bg:'#fff7ed'})}
-                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#fff7ed'})}
-                            {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#fed7aa',fw:700})}
-                            {TD(fS(p.MDL,p.sec?.SxBotN),{bg:'#fff7f0'})}
-                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#fff7f0'})}
-                            {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#fecaca',fw:700})}
+                            {TD(fS(p.MDL,p.sec?.SxTopG))}
+                            {TD(fS(p.MDL,p.sec?.SxBotN))}
+                            {TD(f1(p.denomN),{bg:'#fed7aa'})}
+                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#fed7aa'})}
+                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#fed7aa'})}
+                            {TD(f1(p.McX),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f1(p.MtX),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f3(p.rfcX),{bg:'#fdba74',c:rfC(p.rfcX)})}
+                            {TD(f3(p.rftX),{bg:'#fdba74',c:rfC(p.rftX)})}
+                            {TD(f3(p.gX),{bg:'#fb923c',fw:700,c:rfC(p.gX)})}
+                            {TD(flt(p.gX)?'E-'+(p.gX*80).toFixed(1):'—',{bg:'#ea580c',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -10864,29 +11154,32 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         sub={`K=0.80Fy (same allowable as Maximum) · denom = MLL×(1+I)×DF + M_CF + Wind + Rocking`}/>
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
-                        <THdr bg="#fffbeb" tc="#92400e" cols={[
-                          ['Node'],['Pos(ft)',1],['MDL (ft-k)',1],['denom_Mod (ft-k)',1],
-                          ['Mc_X (comp cap)',1],['RF_comp_M',1],
-                          ['Mt_X (tens cap)',1],['RF_tens_M',1],['RF_M ★',1],
-                          ['fDL_top (ksi)',1],['fLL_top (ksi)',1],['Fb_X (ksi)',1],
-                          ['fDL_bot (ksi)',1],['fLL_bot (ksi)',1],['Ft_X (ksi)',1]]}/>
+                        <THdr2 bg="#fffbeb" tc="#92400e" groups={[
+                          {label:'Location',  cols:['Node','Pos (ft)'],                                       bg:'#fffbeb'},
+                          {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],           bg:'#fefce8',colBg:'#fffbeb'},
+                          {label:'Live Load', cols:['denom_Mod (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],     bg:'#fef3c7',colBg:'#fde68a'},
+                          {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Rating',    cols:['RF_comp_M','RF_tens_M','RF_M ★','E-Rating (×80)'],      bg:'#fde68a',colBg:'#fcd34d',tc:'#78350f'},
+                        ]}/>
                         <tbody>
-                        {aremaAsdData.map(p=>{
-                          const isG=govAsdM?.node===p.node;
-                          return mkRow(p,isG,<>
+                        {augmentedData.map(p=>{
+                          const isG=!p.interpolated&&govAsdM?.node===p.node;
+                          const isCalcX=!!p._isCalcX;
+                          return mkRow(p,isG,isCalcX,<>
                             {TD(f1(p.MDL))}
-                            {TD(f1(p.denomMod),{bg:'#fff7ed'})}
-                            {TD(f1(p.McX),{bg:'#fffbeb'})}
-                            {TD(f3(p.rfcM),{c:rfC(p.rfcM)})}
-                            {TD(f1(p.MtX),{bg:'#fffbeb'})}
-                            {TD(f3(p.rftM),{c:rfC(p.rftM)})}
-                            {TD(f3(p.gM),{bg:'#fef3c7',fw:700,c:rfC(p.gM)})}
-                            {TD(fS(p.MDL,p.sec?.SxTopG),{bg:'#fffbeb'})}
-                            {TD(fS(p.denomMod,p.sec?.SxTopG),{bg:'#fffbeb'})}
-                            {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#fef3c7',fw:700})}
-                            {TD(fS(p.MDL,p.sec?.SxBotN),{bg:'#fefce8'})}
-                            {TD(fS(p.denomMod,p.sec?.SxBotN),{bg:'#fefce8'})}
-                            {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#fde68a',fw:700})}
+                            {TD(fS(p.MDL,p.sec?.SxTopG))}
+                            {TD(fS(p.MDL,p.sec?.SxBotN))}
+                            {TD(f1(p.denomMod),{bg:'#fde68a'})}
+                            {TD(fS(p.denomMod,p.sec?.SxTopG),{bg:'#fde68a'})}
+                            {TD(fS(p.denomMod,p.sec?.SxBotN),{bg:'#fde68a'})}
+                            {TD(f1(p.McX),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f1(p.MtX),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f3(p.rfcM),{bg:'#fcd34d',c:rfC(p.rfcM)})}
+                            {TD(f3(p.rftM),{bg:'#fcd34d',c:rfC(p.rftM)})}
+                            {TD(f3(p.gM),{bg:'#f59e0b',fw:700,c:rfC(p.gM)})}
+                            {TD(flt(p.gM)?'E-'+(p.gM*80).toFixed(1):'—',{bg:'#d97706',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -10903,25 +11196,29 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         sub={`Vn_N = Fs_N×Aw · Vn_X = Fs_X×Aw · RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF`}/>
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'700px',fontSize:'9.5px',fontFamily:'monospace'}}>
-                        <THdr bg="#f9fafb" tc="#374151" cols={[
-                          ['Node'],['Pos(ft)',1],['VDL (k)',1],['dV (k)',1],
-                          ['Vn_N (k)',1],['RF_shear_N',1],
-                          ['Vn_X (k)',1],['RF_shear_X',1],['RF_shear_M',1],
-                          ['fv_DL (ksi)',1],['fv_LL (ksi)',1],['Fs_N (ksi)',1]]}/>
+                        <THdr2 bg="#f3f4f6" tc="#374151" groups={[
+                          {label:'Location',  cols:['Node','Pos (ft)'],                        bg:'#f3f4f6'},
+                          {label:'Dead Load', cols:['VDL (k)','fv_DL (ksi)'],                  bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Live Load', cols:['dV (k)','fv_LL (ksi)'],                   bg:'#eff6ff',colBg:'#dbeafe'},
+                          {label:'Capacity',  cols:['Vn_N (k)','Fs_N (ksi)','Vn_X (k)'],      bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Rating',    cols:['RF_N','RF_X','RF_M ★','E-Rating (×80)'],  bg:'#e5e7eb',colBg:'#d1d5db',tc:'#1f2937'},
+                        ]}/>
                         <tbody>
-                        {aremaAsdData.map(p=>{
-                          const isG=govAsdN?.node===p.node||govAsdX?.node===p.node;
-                          return mkRow(p,isG,<>
+                        {augmentedData.map(p=>{
+                          const isG=!p.interpolated&&(govAsdN?.node===p.node||govAsdX?.node===p.node);
+                          const isCalcX=!!p._isCalcX;
+                          return mkRow(p,isG,isCalcX,<>
                             {TD(f1(p.VDL))}
-                            {TD(f1(p.dV),{bg:'#f9fafb'})}
-                            {TD(f1(p.VnN),{bg:'#f0fdf4'})}
-                            {TD(f3(p.rfvN),{c:rfC(p.rfvN)})}
-                            {TD(f1(p.VnX),{bg:'#fff7ed'})}
-                            {TD(f3(p.rfvX),{c:rfC(p.rfvX)})}
-                            {TD(f3(p.rfvM),{c:rfC(p.rfvM)})}
-                            {TD(p.sec?.Aw ? f2s(p.VDL/p.sec.Aw) : '—',{bg:'#f9fafb'})}
-                            {TD(p.sec?.Aw ? f2s(p.dV/p.sec.Aw) : '—',{bg:'#f9fafb'})}
-                            {TD(p.allo?.Fs_N?.toFixed(2)??'—',{bg:'#e5e7eb',fw:700})}
+                            {TD(p.sec?.Aw ? f2s(p.VDL/p.sec.Aw) : '—')}
+                            {TD(f1(p.dV),{bg:'#dbeafe'})}
+                            {TD(p.sec?.Aw ? f2s(p.dV/p.sec.Aw) : '—',{bg:'#dbeafe'})}
+                            {TD(f1(p.VnN),{bg:'#f3f4f6'})}
+                            {TD(p.allo?.Fs_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f1(p.VnX),{bg:'#f3f4f6'})}
+                            {TD(f3(p.rfvN),{bg:'#d1d5db',c:rfC(p.rfvN)})}
+                            {TD(f3(p.rfvX),{bg:'#d1d5db',c:rfC(p.rfvX)})}
+                            {TD(f3(p.rfvM),{bg:'#9ca3af',fw:700,c:rfC(p.rfvM)})}
+                            {TD((()=>{const rv=Math.min(...[p.rfvN,p.rfvM].filter(v=>flt(v)));return flt(rv)?'E-'+(rv*80).toFixed(1):'—'})(),{bg:'#6b7280',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -10935,18 +11232,24 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         sub={`Category ${_aremaParams.fatCat} · SFT=${_aremaParams.SFT} ksi · RF = SFT×Sx_bot_net/12 / dM`}/>
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'540px',fontSize:'9.5px',fontFamily:'monospace'}}>
-                        <THdr bg="#faf5ff" tc="#7e22ce" cols={[
-                          ['Node'],['Pos(ft)',1],['dM = MLL×(1+I)×DF (ft-k)',1],
-                          ['Sx_bot_net (in³)',1],['SFT×Sx_bot_net/12 (ft-k)',1],['RF_Fat ★',1]]}/>
+                        <THdr2 bg="#faf5ff" tc="#7e22ce" groups={[
+                          {label:'Location',   cols:['Node','Pos (ft)'],                          bg:'#faf5ff'},
+                          {label:'Live Load',  cols:['dM_fat (ft-k)','Sx_bot_net (in³)'],         bg:'#f3e8ff',colBg:'#e9d5ff'},
+                          {label:'Capacity',   cols:['Mf = SFT×Sx/12 (ft-k)'],                   bg:'#faf5ff',colBg:'#f3e8ff'},
+                          {label:'Rating',     cols:['RF_Fat ★','E-Rating (×80)','⚠'],            bg:'#e9d5ff',colBg:'#d8b4fe',tc:'#581c87'},
+                        ]}/>
                         <tbody>
-                        {aremaAsdData.map(p=>{
-                          const isG=govAsdFat?.node===p.node;
+                        {augmentedData.map(p=>{
+                          const isG=!p.interpolated&&govAsdFat?.node===p.node;
+                          const isCalcX=!!p._isCalcX;
                           const cap=p.sec?_aremaParams.SFT*p.sec.SxBotN/12:null;
-                          return mkRow(p,isG,<>
-                            {TD(f1(p.dM),{bg:'#f9fafb'})}
-                            {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#faf5ff'})}
-                            {TD(f1(cap),{bg:'#faf5ff'})}
-                            {TD(f3(p.rfFat),{bg:'#f3e8ff',fw:700,c:rfC(p.rfFat)})}
+                          return mkRow(p,isG,isCalcX,<>
+                            {TD(f1(p.dM_fat??p.dM),{bg:'#e9d5ff'})}
+                            {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#e9d5ff'})}
+                            {TD(f1(cap),{bg:'#f3e8ff'})}
+                            {TD(f3(p.rfFat),{bg:'#d8b4fe',fw:700,c:rfC(p.rfFat)})}
+                            {TD(flt(p.rfFat)?'E-'+(p.rfFat*80).toFixed(1):'—',{bg:'#a855f7',fw:700,c:'#fff'})}
+                            {TD(p.fatAlphaFlag?'⚠ SR>12':'',{c:'#dc2626',fw:700})}
                           </>);
                         })}
                         </tbody>
