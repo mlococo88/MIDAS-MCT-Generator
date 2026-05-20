@@ -355,7 +355,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     try{
       const zDef={...AS,...libSec};
       const s=computeAremaSection(zDef, false);  // MCT: always nominal
-      const secInsp = (libSec.sectionLossEnabled && aremaApplyLoss)
+      const secInsp = (aremaApplyLoss && hasSectionLoss(libSec))
         ? computeAremaSection(zDef, true) : null;
       return {name:libSec.name||libSec.id, svg:aremaGirderSVG(zDef,s), sec:s,
               secInsp, allo:aremaAllowables(zDef,s), zDef};
@@ -1555,7 +1555,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
   const curComps= cur?.aremaComps || JSON.parse(JSON.stringify(baseComps));
   const curDef  = cur ? {...AS, ...cur} : null;
   const curSec  = curDef ? computeAremaSection(curDef, false) : null;              // nominal
-  const curSecInsp = (curDef && cur?.sectionLossEnabled)
+  const curSecInsp = (curDef && hasSectionLoss(curDef))
     ? computeAremaSection(curDef, true) : null;   // as-inspected (with section loss)
   const curAllo = (curDef && curSec) ? aremaAllowables(curDef, curSec) : null;
 
@@ -1790,14 +1790,11 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
           </button>
           <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',
             padding:'3px 8px',borderRadius:'4px',
-            background:cur.sectionLossEnabled?'#fffbeb':'#f9fafb',
-            border:`1px solid ${cur.sectionLossEnabled?'#fcd34d':'#e5e7eb'}`,
+            background:hasSectionLoss(cur)?'#fffbeb':'#f9fafb',
+            border:`1px solid ${hasSectionLoss(cur)?'#fcd34d':'#e5e7eb'}`,
             fontSize:'9.5px',fontFamily:'monospace',
-            color:cur.sectionLossEnabled?'#b45309':'#9ca3af'}}>
-            <input type="checkbox" checked={!!cur.sectionLossEnabled}
-              onChange={e=>updLib(curIdx,{sectionLossEnabled:e.target.checked})}
-              style={{accentColor:'#b45309',width:'11px',height:'11px'}}/>
-            Apply section loss to rating
+            color:hasSectionLoss(cur)?'#b45309':'#9ca3af'}}>
+            🔍 Section loss values active
           </label>
         </div>
 
@@ -1900,7 +1897,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
                           As-insp: Ix={curSecInsp.IxG.toFixed(0)} in⁴ · Sx_bot={curSecInsp.SxBotN.toFixed(1)} in³ · Aw={curSecInsp.Aw.toFixed(2)} in²
                         </span>}
                       </span>
-                    : <span style={{color:'#9ca3af',fontStyle:'italic'}}>Section loss off — check "Apply section loss to rating" above to enable</span>}
+                    : <span style={{color:'#9ca3af',fontStyle:'italic'}}>No loss values entered — add values below to activate</span>}
                 </th>
                 <th style={{padding:'2px 6px',border:'1px solid #fde68a',fontSize:'8px',
                   fontFamily:'monospace',color:'#b45309',textAlign:'center',background:'#fefce8',
@@ -1988,7 +1985,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
                       {row.fixedQty
                         ?<div>
                           <span style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',display:'block'}}>{c.qty||2}</span>
-                          {isAngle&&cur.sectionLossEnabled&&(
+                          {isAngle&&hasSectionLoss(cur)&&(
                             <div style={{marginTop:'3px',display:'flex',flexDirection:'column',gap:'2px',alignItems:'center'}}>
                               {[['lossL','L'],['lossR','R']].map(([field,lbl])=>(
                                 <label key={field} style={{display:'flex',alignItems:'center',gap:'2px',cursor:'pointer',
@@ -4816,6 +4813,12 @@ function calcAngleProps(w, h, t, t_h, t_v) {
 // Full section property computation — both gross (compression) and net (tension) sections.
 // useInspected=true applies per-face section loss to each component (as-inspected condition).
 // Caller controls the flag; computeAremaSection applies it unconditionally when true.
+// Auto-detect whether a section has any loss values entered
+function hasSectionLoss(z) {
+  return (z.aremaComps||[]).some(c=>
+    [c.lossW,c.lossHt,c.lossTH,c.lossTV].some(v=>+(v||0)>0)
+  );
+}
 function computeAremaSection(z, useInspected) {
   const comps   = z.aremaComps || defaultAremaComps();
   const outToOut = +(z.outToOut || 42);
@@ -5154,7 +5157,7 @@ function aremaGirderSVG(z, sec) {
   const {h_bcp,h_tcp,outToOut,gap,hw,tw,ybG,web_bot_y,totalDepth}=sec;
 
   // ── Section loss helpers ──────────────────────────────────────────────────
-  const lossSL = z.sectionLossEnabled === true;
+  const lossSL = hasSectionLoss(z);  // auto-detect from loss values
   const effD = (nom, loss) => lossSL ? Math.max(0, nom-(+(loss)||0)) : nom;
 
   // ── Hole geometry ─────────────────────────────────────────────────────────
@@ -6196,7 +6199,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
           }
         }
         // Use inspected section for capacity when global toggle + per-section toggle are on
-        const useInsp = aremaApplyLoss && (zDef.sectionLossEnabled === true);
+        const useInsp = aremaApplyLoss && hasSectionLoss(zDef);  // global toggle + any loss values
         const sec  = computeAremaSection(zDef, useInsp);
         const allo = aremaAllowables(zDef, sec);
         return { _arema:sec, _allow:allo, _zone:zDef, _useInspected:useInsp,
