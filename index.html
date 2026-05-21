@@ -317,6 +317,8 @@ function computeEquivMCTSection(sec, zDef) {
 // ═══════════════════════════════════════════════════════════════════════════
 function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings={}}) {
   const show = k => settings[k] !== false;  // default true if not in settings
+  const R2 = cfg?.rating || {};  // rating config shorthand
+  const aremaApplyLoss = cfg?.aremaSection?.applyLoss === true;  // derived from cfg
   const f = (v,d=2)=>v!=null&&isFinite(v)?Number(v).toFixed(d):'—';
   const rfC = rf=>rf>=1?'#15803d':rf>=0.5?'#d97706':'#dc2626';
   const rfLbl = rf=>isFinite(rf)?(rf>=1?'PASS':'FAIL'):'—';
@@ -10143,13 +10145,19 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   </div>
                   {aremaAsdData.length>0&&govAsdN&&(<>
                   <button onClick={()=>{
-                    const html=generateAremaReport({
-                      cfg, ap:_aremaParams, data:aremaAsdData,
-                      govN:govAsdN, govX:govAsdX, govM:govAsdM, govFat:govAsdFat,
-                      settings: cfg.rating?.arema_reportSections,
-                    });
-                    const w=window.open('','_blank','width=960,height=900');
-                    if(w){w.document.write(html);w.document.close();}
+                    try {
+                      const html=generateAremaReport({
+                        cfg, ap:_aremaParams, data:aremaAsdData,
+                        govN:govAsdN, govX:govAsdX, govM:govAsdM, govFat:govAsdFat,
+                        settings: cfg.rating?.arema_reportSections,
+                      });
+                      const w=window.open('','_blank','width=960,height=900');
+                      if(w){w.document.write(html);w.document.close();}
+                      else alert('Popup blocked — please allow popups for this page and try again.');
+                    } catch(err) {
+                      alert('Report error: '+err.message);
+                      console.error('generateAremaReport error:',err);
+                    }
                   }} style={{padding:'6px 14px',background:'#1d4ed8',color:'#fff',border:'none',
                     borderRadius:'5px',cursor:'pointer',fontSize:'11px',fontFamily:'monospace',
                     fontWeight:'600',flexShrink:0}}>
