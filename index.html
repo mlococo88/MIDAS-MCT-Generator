@@ -11132,6 +11132,24 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const flt  = v=>v!=null&&isFinite(v)&&v>-9999;
 
                   // ── Multi-vehicle support ─────────────────────────────────
+                  const isLong = v => ALL_VEHICLES.find(av=>av.name===v.name)?.refSpan !== undefined;
+                  const interpVeh = (allNodeRes, x) => {
+                    if (!allNodeRes?.length) return null;
+                    const srt = [...allNodeRes].sort((a,b)=>a.pos-b.pos);
+                    const ex  = srt.find(r=>Math.abs(r.pos-x)<0.005);
+                    if (ex) return ex;
+                    const lo  = [...srt].reverse().find(r=>r.pos<=x);
+                    const hi  = srt.find(r=>r.pos>=x);
+                    if (!lo) return hi; if (!hi) return lo;
+                    const t   = (x-lo.pos)/(hi.pos-lo.pos);
+                    const lp  = (a,b)=>a!=null&&b!=null?a+t*(b-a):(a??b);
+                    return {pos:x,
+                      rfcN:lp(lo.rfcN,hi.rfcN), rftN:lp(lo.rftN,hi.rftN), rfvN:lp(lo.rfvN,hi.rfvN),
+                      rfcX:lp(lo.rfcX,hi.rfcX), rftX:lp(lo.rftX,hi.rftX), rfvX:lp(lo.rfvX,hi.rfvX),
+                      rfcM:lp(lo.rfcM,hi.rfcM), rftM:lp(lo.rftM,hi.rftM), rfvM:lp(lo.rfvM,hi.rfvM),
+                      gN:lp(lo.gN,hi.gN), gX:lp(lo.gX,hi.gX), gM:lp(lo.gM,hi.gM),
+                      rfFat:lp(lo.rfFat,hi.rfFat)};
+                  };
                   const tableVehicles = aremaMultiData.filter(v=>!isLong(v));
                   // Per-vehicle governing node index (by table type)
                   const vehGov = (rfKey) => tableVehicles.map(veh=>{
@@ -11522,7 +11540,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         Hover for details · Scroll to zoom · Drag to pan
                       </span>
                     </div>
-                    <AremaRFChart data={aremaAsdData} vehicles={aremaMultiData.filter(v=>!isLong(v))}/>
+                    <AremaRFChart data={aremaAsdData} vehicles={aremaMultiData.filter(v=>!ALL_VEHICLES.find(av=>av.name===v.name)?.refSpan)}/>
                   </div>
                 )}
 
