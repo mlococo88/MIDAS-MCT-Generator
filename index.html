@@ -1641,6 +1641,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
       Fy: AS.Fy||36, unbracedL: AS.unbracedL||240,
       ryc: AS.ryc||0, autoRyc: AS.autoRyc!==false,
       sectionLossEnabled: false,  // per-section loss: enable to enter face losses
+      bypass85: false,              // if true, skip 0.85×gross net section floor (diagnostic)
     };
     const newLib = [...library, ns];
     setAS({sectionLibrary: newLib});
@@ -1914,6 +1915,18 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
               borderRadius:'4px',fontSize:'10px',cursor:'pointer',fontFamily:'monospace'}}>
             ← Copy from base
           </button>
+          {/* Bypass 0.85×gross floor — diagnostic checkbox */}
+          <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',
+            fontSize:'9px',fontFamily:'monospace',padding:'3px 8px',
+            background:cur.bypass85?'#fef9c3':'#f3f4f6',
+            border:`1px solid ${cur.bypass85?'#fde047':'#e5e7eb'}`,
+            borderRadius:'4px',color:cur.bypass85?'#713f12':'#6b7280',fontWeight:cur.bypass85?700:400}}
+            title="Diagnostic: bypass AREMA §1.5.8 0.85×gross floor to verify hole deduction effect">
+            <input type="checkbox" checked={!!cur.bypass85}
+              onChange={e=>updLib(curIdx,{bypass85:e.target.checked})}
+              style={{accentColor:'#ca8a04',width:'11px',height:'11px'}}/>
+            Bypass 0.85× floor
+          </label>
           <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',
             padding:'3px 8px',borderRadius:'4px',
             background:hasSectionLoss(cur)?'#fffbeb':'#f9fafb',
@@ -4980,6 +4993,7 @@ function computeAremaSection(z, useInspected) {
   const web_top_y = h_bcp + gap + hw;
 
   // ── Hole deductions (AREMA §1.5.8) ────────────────────────────────────────
+  const bypass85  = !!z.bypass85;          // skip 0.85×gross floor when true
   const holeDiam  = +(z.holeDiam    ?? 0);
   const holePitch = +(z.holePitch   ?? 3);
   const holeGage  = +(z.holeGage    ?? 1.5);
@@ -4989,7 +5003,7 @@ function computeAremaSection(z, useInspected) {
     const deduct  = holesN * holeDiam;
     const stagger = (holesN>1 && holePitch>0 && holeGage>0)
       ? (holesN-1)*holePitch**2/(4*holeGage) : 0;
-    return Math.max(gross - deduct + stagger, 0.85*gross);
+    return bypass85 ? gross - deduct + stagger : Math.max(gross - deduct + stagger, 0.85*gross);
   }
   const webHoleDiam  = +(z.webHoleDiam     ?? 0);
   const webHolePitch = +(z.webHolePitch    ?? 3);
@@ -5000,7 +5014,7 @@ function computeAremaSection(z, useInspected) {
     const deduct  = webHolesN * webHoleDiam;
     const stagger = (webHolesN>1 && webHolePitch>0 && webHoleGage>0)
       ? (webHolesN-1)*webHolePitch**2/(4*webHoleGage) : 0;
-    return Math.max(gross - deduct + stagger, 0.85*gross);
+    return bypass85 ? gross - deduct + stagger : Math.max(gross - deduct + stagger, 0.85*gross);
   }
   // 0.85x gross floor detection helpers
   const _raw=(gross,n,d,p,g)=>gross-n*d+(n>1&&p>0&&g>0?(n-1)*p**2/(4*g):0);
@@ -5033,6 +5047,8 @@ function computeAremaSection(z, useInspected) {
     const makeBanItem_lossL = ban.lossL !== false;
     const makeBanItem_lossR = ban.lossR !== false;
     // Helper: build one angle item given whether loss is applied
+    // Flange holes split between L and R angle — each side gets ceil(total/2)
+    const banHolesPerSide = Math.max(0, Math.ceil(holesN / 2));
     function makeBanItem(side, hasLoss) {
       const w_e  = hasLoss ? effDim(+ban.w, ban.lossW)  : +ban.w;
       const h_e  = hasLoss ? effDim(+ban.h, ban.lossHt) : +ban.h;
@@ -5041,11 +5057,19 @@ function computeAremaSection(z, useInspected) {
       const ap   = calcAngleProps(w_e, h_e, +ban.t, th_e, tv_e);
       const grossA = ap.area;
       const A_vert     = tv_e * h_e;
-      const b85H = is85(w_e - tv_e);
+      // Use per-side hole count for the outstanding leg (matches SVG behaviour)
+      const b85H = holeDiam&&banHolesPerSide ? _raw(w_e-tv_e,banHolesPerSide,holeDiam,holePitch,holeGage) < 0.85*(w_e-tv_e) : false;
       const b85V = is85Web(h_e);
       const h_vnet     = netWidthWeb(h_e);
       const A_vert_net = tv_e * h_vnet;
-      const nHW        = netWidth(w_e - tv_e);
+      // netWidth equivalent using per-side count
+      const _nwBan = (gross)=>{
+        if(!holeDiam||!banHolesPerSide) return gross;
+        const ded = banHolesPerSide*holeDiam;
+        const stag = banHolesPerSide>1&&holePitch>0&&holeGage>0 ? (banHolesPerSide-1)*holePitch**2/(4*holeGage) : 0;
+        return bypass85 ? gross-ded+stag : Math.max(gross-ded+stag, 0.85*gross);
+      };
+      const nHW        = _nwBan(w_e - tv_e);
       const nHoriz     = nHW * th_e;
       const netA       = A_vert_net + nHoriz;
       const yc_net     = netA>0 ? (A_vert_net*(h_vnet/2)+nHoriz*(th_e/2))/netA : 0;
@@ -5105,6 +5129,7 @@ function computeAremaSection(z, useInspected) {
   if (tan_.on && tan_.w>0 && tan_.h>0 && tan_.t>0) {
     const tanLossL = tan_.lossL !== false;
     const tanLossR = tan_.lossR !== false;
+    const tanHolesPerSide = Math.max(0, Math.ceil(holesN / 2));
     function makeTanItem(side, hasLoss) {
       const w_e  = hasLoss ? effDim(+tan_.w, tan_.lossW)  : +tan_.w;
       const h_e  = hasLoss ? effDim(+tan_.h, tan_.lossHt) : +tan_.h;
