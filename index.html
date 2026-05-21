@@ -10155,7 +10155,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     fontWeight:'600',flexShrink:0}}>
                     📄 Print AREMA Report
                   </button>
-                  <AremaReportSettingsPanel cfg={cfg} updRating={updRating}/>
+                  <AremaReportSettingsPanel cfg={cfg} setRating={setRating}/>
                   </>)}
                 </div>
                 {!hasAremaZone&&(
@@ -13086,9 +13086,9 @@ function SavesModal({ cfg, onLoad, onClose,
   );
 }
 
-function AremaReportSettingsPanel({ cfg, updRating }) {
+function AremaReportSettingsPanel({ cfg, setRating }) {
   const RS = cfg.rating?.arema_reportSections || {};
-  const updRS = (key,val) => updRating('arema_reportSections',{...RS,[key]:val});
+  const updRS = (key,val) => setRating('arema_reportSections',{...RS,[key]:val});
   const SECTS = [
     ['cover','Cover Page'],['toc','Table of Contents'],
     ['summaryTable','Rating Summary Table'],['geometry','Bridge Geometry'],
@@ -13134,7 +13134,7 @@ function AremaReportSettingsPanel({ cfg, updRating }) {
             <div key={key} style={{display:'flex',flexDirection:'column',gap:'2px'}}>
               <span style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',fontWeight:'600'}}>{lbl}</span>
               <input type="text" value={cfg.rating?.[key]||''} placeholder={lbl}
-                onChange={e=>updRating(key,e.target.value)}
+                onChange={e=>setRating(key,e.target.value)}
                 style={{fontSize:'9px',fontFamily:'monospace',padding:'3px 6px',
                   border:'1px solid #bfdbfe',borderRadius:'3px',background:'#fff',width:'100%'}}/>
             </div>
@@ -13146,7 +13146,7 @@ function AremaReportSettingsPanel({ cfg, updRating }) {
         </div>
         <textarea rows={3} value={cfg.rating?.arema_reportNotes||''}
           placeholder="Enter project-specific notes, assumptions, or special conditions..."
-          onChange={e=>updRating('arema_reportNotes',e.target.value)}
+          onChange={e=>setRating('arema_reportNotes',e.target.value)}
           style={{width:'100%',fontSize:'9px',fontFamily:'monospace',padding:'5px',
             border:'1px solid #bfdbfe',borderRadius:'3px',resize:'vertical',background:'#fff'}}/>
       </div>
