@@ -11130,6 +11130,75 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const f2s  = v=>v!=null&&isFinite(v)?v.toFixed(2):'—';
                   const fS   = (M,Sx)=>(M&&Sx&&isFinite(M)&&isFinite(Sx))?f2s(M*12/Sx):'—';
                   const flt  = v=>v!=null&&isFinite(v)&&v>-9999;
+
+                  // ── Multi-vehicle support ─────────────────────────────────
+                  const tableVehicles = aremaMultiData.filter(v=>!isLong(v));
+                  // Per-vehicle governing node index (by table type)
+                  const vehGov = (rfKey) => tableVehicles.map(veh=>{
+                    const rows=veh.allNodeRes||[];
+                    if(!rows.length) return null;
+                    return rows.reduce((best,r)=>{
+                      const v=r[rfKey]; const bv=best?.[rfKey];
+                      return (v!=null&&isFinite(v)&&(bv==null||v<bv))?r:best;
+                    },null);
+                  });
+                  const vehGovN=vehGov('gN'), vehGovX=vehGov('gX'),
+                        vehGovM=vehGov('gM'), vehGovFat=vehGov('rfFat'),
+                        vehGovV=vehGov('rfvM');
+                  // Get a vehicle's RF fields at a given position
+                  const vRF = (veh,pos)=>interpVeh(veh.allNodeRes||[],pos)||{};
+                  // Vehicle color palette
+                  const vehColors = ['#065f46','#1d4ed8','#7e22ce','#c2410c','#0369a1','#4d7c0f'];
+                  const vehColor  = i => vehColors[i%vehColors.length];
+                  // Per-vehicle THdr2 groups for flexure (Normal/Max/Mod)
+                  const vehFlexGroups = (rfCkey,rfTkey,gKey) => tableVehicles.map((veh,i)=>({
+                    label: veh.name||`Veh ${i+1}`,
+                    cols:  [rfCkey,rfTkey,gKey,'Rating'],
+                    bg:    vehColor(i)+'22', colBg: vehColor(i)+'11',
+                    tc:    vehColor(i),
+                  }));
+                  // Per-vehicle cells for flexure
+                  const vehFlexCells = (p,rfCkey,rfTkey,gKey) => tableVehicles.map((veh,i)=>{
+                    const r=vRF(veh,p.pos);
+                    const rc=r[rfCkey], rt=r[rfTkey], g=r[gKey];
+                    const col=vehColor(i);
+                    return (<React.Fragment key={veh.name||i}>
+                      {TD(f3(rc),{bg:col+'18',c:rfC(rc)})}
+                      {TD(f3(rt),{bg:col+'18',c:rfC(rt)})}
+                      {TD(f3(g), {bg:col+'30',fw:700,c:rfC(g)})}
+                      {TD(flt(g)?(g*eNum).toFixed(1):'—',{bg:col+'50',fw:700,c:rfC(g)})}
+                    </React.Fragment>);
+                  });
+                  // Per-vehicle groups for shear
+                  const vehShearGroups = () => tableVehicles.map((veh,i)=>({
+                    label: veh.name||`Veh ${i+1}`,
+                    cols:  ['RF_N','RF_M ★','Rating'],
+                    bg:    vehColor(i)+'22', colBg: vehColor(i)+'11', tc: vehColor(i),
+                  }));
+                  const vehShearCells = (p) => tableVehicles.map((veh,i)=>{
+                    const r=vRF(veh,p.pos);
+                    const col=vehColor(i);
+                    const rv=Math.min(...[r.rfvN,r.rfvM].filter(v=>flt(v)));
+                    return (<React.Fragment key={veh.name||i}>
+                      {TD(f3(r.rfvN),{bg:col+'18',c:rfC(r.rfvN)})}
+                      {TD(f3(r.rfvM),{bg:col+'30',fw:700,c:rfC(r.rfvM)})}
+                      {TD(flt(rv)?(rv*eNum).toFixed(1):'—',{bg:col+'50',fw:700,c:rfC(rv)})}
+                    </React.Fragment>);
+                  });
+                  // Per-vehicle groups for fatigue
+                  const vehFatGroups = () => tableVehicles.map((veh,i)=>({
+                    label: veh.name||`Veh ${i+1}`,
+                    cols:  ['RF_Fat','Rating'],
+                    bg:    vehColor(i)+'22', colBg: vehColor(i)+'11', tc: vehColor(i),
+                  }));
+                  const vehFatCells = (p) => tableVehicles.map((veh,i)=>{
+                    const r=vRF(veh,p.pos);
+                    const col=vehColor(i);
+                    return (<React.Fragment key={veh.name||i}>
+                      {TD(f3(r.rfFat),{bg:col+'30',fw:700,c:rfC(r.rfFat)})}
+                      {TD(flt(r.rfFat)?(r.rfFat*eNum).toFixed(1):'—',{bg:col+'50',fw:700,c:rfC(r.rfFat)})}
+                    </React.Fragment>);
+                  });
                   const THdr = ({cols,bg,tc}) => (
                     <thead><tr style={{background:bg||'#f3f4f6'}}>
                       {cols.map(([lbl,right])=>(
@@ -11263,11 +11332,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f0fdf4" tc="#15803d" groups={[
-                          {label:'Location',     cols:['Node','Pos (ft)'],                                              bg:'#f0fdf4'},
-                          {label:'Dead Load',    cols:[dlFactor!==1?`MDL×${dlFactor.toFixed(2)} (ft-k)`:'MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'], bg:'#fafff5',colBg:'#f0fdf4'},
-                          {label:'Live Load',    cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],              bg:'#eff6ff',colBg:'#dbeafe'},
-                          {label:'Capacity',     cols:['Mc_N (ft-k)','Fb_N (ksi)','Mt_N (ft-k)','Ft_N (ksi)'],        bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',       cols:['RF_comp_N','RF_tens_N','RF_N ★','Rating Value'],             bg:'#dcfce7',colBg:'#bbf7d0',tc:'#065f46'},
+                          {label:'Location',  cols:['Node','Pos (ft)'],                                              bg:'#f0fdf4'},
+                          {label:'Dead Load', cols:[dlFactor!==1?`MDL×${dlFactor.toFixed(2)} (ft-k)`:'MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'], bg:'#fafff5',colBg:'#f0fdf4'},
+                          {label:'Live Load (E-80)', cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],       bg:'#eff6ff',colBg:'#dbeafe'},
+                          {label:'Capacity',  cols:['Mc_N (ft-k)','Fb_N (ksi)','Mt_N (ft-k)','Ft_N (ksi)'],        bg:'#f9fafb',colBg:'#f3f4f6'},
+                          ...vehFlexGroups('RF_comp_N','RF_tens_N','RF_N ★'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11284,10 +11353,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(p.allo?.Fb_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtN),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {TD(f3(p.rfcN),{bg:'#bbf7d0',c:rfC(p.rfcN)})}
-                            {TD(f3(p.rftN),{bg:'#bbf7d0',c:rfC(p.rftN)})}
-                            {TD(f3(p.gN),{bg:'#86efac',fw:700,c:rfC(p.gN)})}
-                            {TD(flt(p.gN)?(p.gN*eNum).toFixed(1)+'':'—',{bg:'#4ade80',fw:700,c:rfC(p.gN)})}
+                            {vehFlexCells(p,'rfcN','rftN','gN')}
                           </>);
                         })}
                         </tbody>
@@ -11307,11 +11373,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#fff7ed" tc="#c2410c" groups={[
-                          {label:'Location',  cols:['Node','Pos (ft)'],                                   bg:'#fff7ed'},
-                          {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],       bg:'#fefce8',colBg:'#fff7ed'},
-                          {label:'Live Load', cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],   bg:'#fff1e6',colBg:'#fed7aa'},
-                          {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_comp_X','RF_tens_X','RF_X ★','Rating Value'],  bg:'#fed7aa',colBg:'#fdba74',tc:'#7c2d12'},
+                          {label:'Location',        cols:['Node','Pos (ft)'],                                   bg:'#fff7ed'},
+                          {label:'Dead Load',       cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],       bg:'#fefce8',colBg:'#fff7ed'},
+                          {label:'Live Load (E-80)',cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],   bg:'#fff1e6',colBg:'#fed7aa'},
+                          {label:'Capacity',        cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
+                          ...vehFlexGroups('RF_comp_X','RF_tens_X','RF_X ★'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11328,10 +11394,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {TD(f3(p.rfcX),{bg:'#fdba74',c:rfC(p.rfcX)})}
-                            {TD(f3(p.rftX),{bg:'#fdba74',c:rfC(p.rftX)})}
-                            {TD(f3(p.gX),{bg:'#fb923c',fw:700,c:rfC(p.gX)})}
-                            {TD(flt(p.gX)?(p.gX*eNum).toFixed(1)+'':'—',{bg:'#ea580c',fw:700,c:'#fff'})}
+                            {vehFlexCells(p,'rfcX','rftX','gX')}
                           </>);
                         })}
                         </tbody>
@@ -11349,11 +11412,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#fffbeb" tc="#92400e" groups={[
-                          {label:'Location',  cols:['Node','Pos (ft)'],                                       bg:'#fffbeb'},
-                          {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],           bg:'#fefce8',colBg:'#fffbeb'},
-                          {label:'Live Load', cols:['denom_Mod (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],     bg:'#fef3c7',colBg:'#fde68a'},
-                          {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_comp_M','RF_tens_M','RF_M ★','Rating Value'],      bg:'#fde68a',colBg:'#fcd34d',tc:'#78350f'},
+                          {label:'Location',        cols:['Node','Pos (ft)'],                                       bg:'#fffbeb'},
+                          {label:'Dead Load',       cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],           bg:'#fefce8',colBg:'#fffbeb'},
+                          {label:'Live Load (E-80)',cols:['denom_Mod (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],     bg:'#fef3c7',colBg:'#fde68a'},
+                          {label:'Capacity',        cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
+                          ...vehFlexGroups('RF_comp_M','RF_tens_M','RF_M ★'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11370,10 +11433,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {TD(f3(p.rfcM),{bg:'#fcd34d',c:rfC(p.rfcM)})}
-                            {TD(f3(p.rftM),{bg:'#fcd34d',c:rfC(p.rftM)})}
-                            {TD(f3(p.gM),{bg:'#f59e0b',fw:700,c:rfC(p.gM)})}
-                            {TD(flt(p.gM)?(p.gM*eNum).toFixed(1)+'':'—',{bg:'#d97706',fw:700,c:'#fff'})}
+                            {vehFlexCells(p,'rfcM','rftM','gM')}
                           </>);
                         })}
                         </tbody>
@@ -11391,11 +11451,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{overflowX:'auto'}}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'700px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f3f4f6" tc="#374151" groups={[
-                          {label:'Location',  cols:['Node','Pos (ft)'],                        bg:'#f3f4f6'},
-                          {label:'Dead Load', cols:['VDL (k)','fv_DL (ksi)'],                  bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Live Load', cols:['dV (k)','fv_LL (ksi)'],                   bg:'#eff6ff',colBg:'#dbeafe'},
-                          {label:'Capacity',  cols:['Vn_N (k)','Fs_N (ksi)','Vn_X (k)'],      bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_N','RF_X','RF_M ★','Rating Value'],  bg:'#e5e7eb',colBg:'#d1d5db',tc:'#1f2937'},
+                          {label:'Location',        cols:['Node','Pos (ft)'],                        bg:'#f3f4f6'},
+                          {label:'Dead Load',       cols:['VDL (k)','fv_DL (ksi)'],                  bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Live Load (E-80)',cols:['dV (k)','fv_LL (ksi)'],                   bg:'#eff6ff',colBg:'#dbeafe'},
+                          {label:'Capacity',        cols:['Vn_N (k)','Fs_N (ksi)','Vn_X (k)'],      bg:'#f9fafb',colBg:'#f3f4f6'},
+                          ...vehShearGroups(),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11409,10 +11469,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(f1(p.VnN),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Fs_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.VnX),{bg:'#f3f4f6'})}
-                            {TD(f3(p.rfvN),{bg:'#d1d5db',c:rfC(p.rfvN)})}
-                            {TD(f3(p.rfvX),{bg:'#d1d5db',c:rfC(p.rfvX)})}
-                            {TD(f3(p.rfvM),{bg:'#9ca3af',fw:700,c:rfC(p.rfvM)})}
-                            {TD((()=>{const rv=Math.min(...[p.rfvN,p.rfvM].filter(v=>flt(v)));return flt(rv)?(rv*eNum).toFixed(1)+'':'—'})(),{bg:'#6b7280',fw:700,c:'#fff'})}
+                            {vehShearCells(p)}
                           </>);
                         })}
                         </tbody>
@@ -11428,9 +11485,9 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'540px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#faf5ff" tc="#7e22ce" groups={[
                           {label:'Location',   cols:['Node','Pos (ft)'],                          bg:'#faf5ff'},
-                          {label:'Live Load',  cols:['dM_fat (ft-k)','Sx_bot_net (in³)'],         bg:'#f3e8ff',colBg:'#e9d5ff'},
-                          {label:'Capacity',   cols:['Mf = SFT×Sx/12 (ft-k)'],                   bg:'#faf5ff',colBg:'#f3e8ff'},
-                          {label:'Rating',     cols:['RF_Fat ★','Rating Value','⚠'],            bg:'#e9d5ff',colBg:'#d8b4fe',tc:'#581c87'},
+                          {label:'Live Load (E-80)', cols:['dM_fat (ft-k)','Sx_bot_net (in³)'],  bg:'#f3e8ff',colBg:'#e9d5ff'},
+                          {label:'Capacity',         cols:['Mf = SFT×Sx/12 (ft-k)','⚠'],          bg:'#faf5ff',colBg:'#f3e8ff'},
+                          ...vehFatGroups(),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11441,9 +11498,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(f1(p.dM_fat??p.dM),{bg:'#e9d5ff'})}
                             {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#e9d5ff'})}
                             {TD(f1(cap),{bg:'#f3e8ff'})}
-                            {TD(f3(p.rfFat),{bg:'#d8b4fe',fw:700,c:rfC(p.rfFat)})}
-                            {TD(flt(p.rfFat)?(p.rfFat*eNum).toFixed(1)+'':'—',{bg:'#a855f7',fw:700,c:'#fff'})}
                             {TD(p.fatAlphaFlag?'⚠ SR>12':'',{c:'#dc2626',fw:700})}
+                            {vehFatCells(p)}
                           </>);
                         })}
                         </tbody>
@@ -11466,7 +11522,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         Hover for details · Scroll to zoom · Drag to pan
                       </span>
                     </div>
-                    <AremaRFChart data={aremaAsdData}/>
+                    <AremaRFChart data={aremaAsdData} vehicles={aremaMultiData.filter(v=>!isLong(v))}/>
                   </div>
                 )}
 
@@ -13230,56 +13286,82 @@ function AremaReportSettingsPanel({ cfg, setRating }) {
   );
 }
 
-function AremaRFChart({ data }) {
-  const divRef = useRef(null);
+function AremaRFChart({ data, vehicles=[] }) {
+  const divRef   = useRef(null);
+  const [hidden, setHidden] = React.useState({});
+  const toggle = key => setHidden(h=>({...h,[key]:!h[key]}));
+  const vehColors = ['#0284c7','#0891b2','#6366f1','#ec4899','#14b8a6','#f97316'];
+
   useEffect(()=>{
-    if (!divRef.current || !data?.length) return;
-    const series = [
-      {key:'gN',   name:'Normal',   color:'#16a34a'},
-      {key:'gX',   name:'Maximum',  color:'#c2410c'},
-      {key:'gM',   name:'Modified', color:'#d97706'},
-      {key:'rfFat',name:'Fatigue',  color:'#7e22ce'},
+    if(!divRef.current) return;
+    const e80Series=[
+      {key:'gN',  name:'E-80 Normal', color:'#16a34a'},
+      {key:'gX',  name:'E-80 Max',    color:'#c2410c'},
+      {key:'gM',  name:'E-80 Mod',    color:'#d97706'},
+      {key:'rfFat',name:'E-80 Fat',   color:'#7e22ce'},
     ];
-    const traces = series.map(s => {
-      const pts = data.filter(p=>p[s.key]!=null&&isFinite(p[s.key]));
-      const eRating = pts.map(p=>(p[s.key]*(typeof eNum!=='undefined'?eNum:80)).toFixed(1)+'');
-      return {
-        x: pts.map(p=>p.pos),
-        y: pts.map(p=>p[s.key]),
-        name: s.name,
-        line: {color:s.color, width:2.5},
-        mode: 'lines',
-        type: 'scatter',
-        customdata: pts.map((p,i)=>[`N${p.node}`,eRating[i]]),
-        hovertemplate: '<b>%{customdata[0]}</b> · %{x:.2f} ft<br>RF: %{y:.3f}<br>E-Rating: %{customdata[1]}<extra>'+s.name+'</extra>',
-      };
+    const traces=[];
+    e80Series.forEach(s=>{
+      if(hidden[s.key]) return;
+      const pts=(data||[]).filter(p=>p[s.key]!=null&&isFinite(p[s.key]));
+      traces.push({x:pts.map(p=>p.pos),y:pts.map(p=>p[s.key]),name:s.name,
+        line:{color:s.color,width:2.5},mode:'lines',type:'scatter',
+        customdata:pts.map(p=>[p.node?`N${p.node}`:p.pos.toFixed(2),p.pos.toFixed(2),(p[s.key]*80).toFixed(1)]),
+        hovertemplate:'<b>%{customdata[0]}</b> · %{customdata[1]} ft<br>RF: %{y:.3f}<br>Rating: %{customdata[2]}<extra>'+s.name+'</extra>'});
     });
-    const xMin=data[0]?.pos??0, xMax=data[data.length-1]?.pos??1;
-    Plotly.newPlot(divRef.current, traces, {
-      shapes:[
-        {type:'rect', x0:xMin,x1:xMax, y0:0,y1:1,
-         fillcolor:'#fee2e2', opacity:0.25, line:{width:0}, layer:'below'},
-        {type:'line', x0:xMin,x1:xMax, y0:1,y1:1,
-         line:{color:'#dc2626',width:1.5,dash:'dash'}},
-      ],
-      annotations:[{x:xMax,y:1,xanchor:'right',yanchor:'bottom',
-        text:'RF = 1.0',showarrow:false,
-        font:{color:'#dc2626',size:10,family:'monospace'}}],
-      xaxis:{title:{text:'Position along span (ft)',font:{size:10,family:'monospace'}},
-        tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6',
-        range:[xMin,xMax]},
-      yaxis:{title:{text:'Rating Factor (RF)',font:{size:10,family:'monospace'}},
-        tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
-      legend:{orientation:'h',y:1.08,font:{family:'monospace',size:10.5}},
-      margin:{l:52,r:20,t:32,b:48},
-      paper_bgcolor:'#fff', plot_bgcolor:'#fafafa',
-      hovermode:'x unified',
-    },{responsive:true,displayModeBar:true,displaylogo:false,
-       modeBarButtonsToRemove:['select2d','lasso2d'],scrollZoom:true});
-    return()=>{ if(divRef.current) Plotly.purge(divRef.current); };
-  },[data]);
-  return <div ref={divRef} style={{width:'100%',height:'280px'}}/>;
+    (vehicles||[]).forEach((veh,i)=>{
+      const key='veh_'+veh.name;
+      if(hidden[key]) return;
+      const pts=(veh.allNodeRes||[]);
+      const col=vehColors[i%vehColors.length];
+      traces.push({
+        x:pts.map(p=>p.pos),
+        y:pts.map(p=>{const vals=[p.gN,p.gX,p.gM].filter(v=>v!=null&&isFinite(v));return vals.length?Math.min(...vals):null;}),
+        name:(veh.name||`Veh ${i+1}`)+' (gov)',
+        line:{color:col,width:2,dash:'dot'},mode:'lines',type:'scatter',
+        customdata:pts.map(p=>[p.node?`N${p.node}`:p.pos.toFixed(2),p.pos.toFixed(2)]),
+        hovertemplate:'<b>%{customdata[0]}</b> · %{customdata[1]} ft<br>RF: %{y:.3f}<extra>'+(veh.name||'')+'</extra>'});
+    });
+    if(!traces.length){Plotly.purge(divRef.current);return;}
+    const allPts=[...(data||[]),...(vehicles||[]).flatMap(v=>v.allNodeRes||[])];
+    const xMin=allPts.length?Math.min(...allPts.map(p=>p.pos)):0;
+    const xMax=allPts.length?Math.max(...allPts.map(p=>p.pos)):1;
+    Plotly.newPlot(divRef.current,traces,{
+      shapes:[{type:'rect',x0:xMin,x1:xMax,y0:0,y1:1,fillcolor:'#fee2e2',opacity:0.2,line:{width:0},layer:'below'},
+              {type:'line',x0:xMin,x1:xMax,y0:1,y1:1,line:{color:'#dc2626',width:1.5,dash:'dash'}}],
+      annotations:[{x:xMax,y:1,xanchor:'right',yanchor:'bottom',text:'RF = 1.0',showarrow:false,font:{color:'#dc2626',size:10,family:'monospace'}}],
+      xaxis:{title:{text:'Position (ft)',font:{size:10,family:'monospace'}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6',range:[xMin,xMax]},
+      yaxis:{title:{text:'RF',font:{size:10,family:'monospace'}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
+      legend:{orientation:'h',y:1.14,font:{family:'monospace',size:9}},
+      margin:{l:48,r:16,t:38,b:40},paper_bgcolor:'#fff',plot_bgcolor:'#fafafa',hovermode:'x unified',
+    },{responsive:true,displayModeBar:true,displaylogo:false,modeBarButtonsToRemove:['select2d','lasso2d'],scrollZoom:true});
+    return()=>{if(divRef.current)Plotly.purge(divRef.current);};
+  },[data,vehicles,hidden]);
+
+  const allKeys=[
+    {key:'gN',label:'Normal',color:'#16a34a'},{key:'gX',label:'Max',color:'#c2410c'},
+    {key:'gM',label:'Mod',color:'#d97706'},{key:'rfFat',label:'Fatigue',color:'#7e22ce'},
+    ...(vehicles||[]).map((v,i)=>({key:'veh_'+v.name,label:v.name||`Veh${i+1}`,color:vehColors[i%6]})),
+  ];
+  return (
+    <div>
+      <div style={{display:'flex',flexWrap:'wrap',gap:'4px',padding:'5px 8px 6px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
+        <span style={{fontSize:'8px',fontFamily:'monospace',color:'#9ca3af',alignSelf:'center',marginRight:'4px'}}>Show:</span>
+        {allKeys.map(({key,label,color})=>(
+          <button key={key} onClick={()=>toggle(key)} style={{
+            padding:'2px 8px',borderRadius:'12px',fontSize:'8.5px',fontFamily:'monospace',
+            cursor:'pointer',border:`1px solid ${hidden[key]?'#e5e7eb':color}`,
+            background:hidden[key]?'#f9fafb':color+'18',color:hidden[key]?'#9ca3af':color,
+            fontWeight:hidden[key]?400:700,textDecoration:hidden[key]?'line-through':'none'}}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <div ref={divRef} style={{width:'100%',height:'255px'}}/>
+    </div>
+  );
 }
+
 
 function App() {
   const [step,setStep]=useState(0);
