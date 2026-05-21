@@ -11139,7 +11139,14 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   })();
                   // Build augmented data array with interpolated row inserted
                   const augmentedData = (()=>{
-                    if(!calcXData||!calcXData.interpolated) return aremaAsdData;
+                    if(!calcXData) return aremaAsdData;
+                    if(!calcXData.interpolated) {
+                      // Close to existing node — mark that node with _isCalcX flag
+                      return aremaAsdData.map(p=>
+                        Math.abs(p.pos-_xVal2)<0.1 ? {...p,_isCalcX:true} : p
+                      );
+                    }
+                    // Insert interpolated row at correct position
                     const out=[];
                     let inserted=false;
                     aremaAsdData.forEach((p,i)=>{
@@ -11199,7 +11206,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           {label:'Dead Load',    cols:[dlFactor!==1?`MDL×${dlFactor.toFixed(2)} (ft-k)`:'MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'], bg:'#fafff5',colBg:'#f0fdf4'},
                           {label:'Live Load',    cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],              bg:'#eff6ff',colBg:'#dbeafe'},
                           {label:'Capacity',     cols:['Mc_N (ft-k)','Fb_N (ksi)','Mt_N (ft-k)','Ft_N (ksi)'],        bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',       cols:['RF_comp_N','RF_tens_N','RF_N ★','E-Rating (×80)'],             bg:'#dcfce7',colBg:'#bbf7d0',tc:'#065f46'},
+                          {label:'Rating',       cols:['RF_comp_N','RF_tens_N','RF_N ★',`E-Rating (×${eNum})`],             bg:'#dcfce7',colBg:'#bbf7d0',tc:'#065f46'},
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11219,7 +11226,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                             {TD(f3(p.rfcN),{bg:'#bbf7d0',c:rfC(p.rfcN)})}
                             {TD(f3(p.rftN),{bg:'#bbf7d0',c:rfC(p.rftN)})}
                             {TD(f3(p.gN),{bg:'#86efac',fw:700,c:rfC(p.gN)})}
-                            {TD(flt(p.gN)?'E-'+(p.gN*80).toFixed(1):'—',{bg:'#4ade80',fw:700,c:rfC(p.gN)})}
+                            {TD(flt(p.gN)?`E-${(p.gN*eNum).toFixed(1)}`:'—',{bg:'#4ade80',fw:700,c:rfC(p.gN)})}
                           </>);
                         })}
                         </tbody>
@@ -11243,7 +11250,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],       bg:'#fefce8',colBg:'#fff7ed'},
                           {label:'Live Load', cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],   bg:'#fff1e6',colBg:'#fed7aa'},
                           {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_comp_X','RF_tens_X','RF_X ★','E-Rating (×80)'],  bg:'#fed7aa',colBg:'#fdba74',tc:'#7c2d12'},
+                          {label:'Rating',    cols:['RF_comp_X','RF_tens_X','RF_X ★',`E-Rating (×${eNum})`],  bg:'#fed7aa',colBg:'#fdba74',tc:'#7c2d12'},
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11263,7 +11270,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                             {TD(f3(p.rfcX),{bg:'#fdba74',c:rfC(p.rfcX)})}
                             {TD(f3(p.rftX),{bg:'#fdba74',c:rfC(p.rftX)})}
                             {TD(f3(p.gX),{bg:'#fb923c',fw:700,c:rfC(p.gX)})}
-                            {TD(flt(p.gX)?'E-'+(p.gX*80).toFixed(1):'—',{bg:'#ea580c',fw:700,c:'#fff'})}
+                            {TD(flt(p.gX)?`E-${(p.gX*eNum).toFixed(1)}`:'—',{bg:'#ea580c',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -11285,7 +11292,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           {label:'Dead Load', cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],           bg:'#fefce8',colBg:'#fffbeb'},
                           {label:'Live Load', cols:['denom_Mod (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],     bg:'#fef3c7',colBg:'#fde68a'},
                           {label:'Capacity',  cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_comp_M','RF_tens_M','RF_M ★','E-Rating (×80)'],      bg:'#fde68a',colBg:'#fcd34d',tc:'#78350f'},
+                          {label:'Rating',    cols:['RF_comp_M','RF_tens_M','RF_M ★',`E-Rating (×${eNum})`],      bg:'#fde68a',colBg:'#fcd34d',tc:'#78350f'},
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11305,7 +11312,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                             {TD(f3(p.rfcM),{bg:'#fcd34d',c:rfC(p.rfcM)})}
                             {TD(f3(p.rftM),{bg:'#fcd34d',c:rfC(p.rftM)})}
                             {TD(f3(p.gM),{bg:'#f59e0b',fw:700,c:rfC(p.gM)})}
-                            {TD(flt(p.gM)?'E-'+(p.gM*80).toFixed(1):'—',{bg:'#d97706',fw:700,c:'#fff'})}
+                            {TD(flt(p.gM)?`E-${(p.gM*eNum).toFixed(1)}`:'—',{bg:'#d97706',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -11327,7 +11334,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           {label:'Dead Load', cols:['VDL (k)','fv_DL (ksi)'],                  bg:'#f9fafb',colBg:'#f3f4f6'},
                           {label:'Live Load', cols:['dV (k)','fv_LL (ksi)'],                   bg:'#eff6ff',colBg:'#dbeafe'},
                           {label:'Capacity',  cols:['Vn_N (k)','Fs_N (ksi)','Vn_X (k)'],      bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Rating',    cols:['RF_N','RF_X','RF_M ★','E-Rating (×80)'],  bg:'#e5e7eb',colBg:'#d1d5db',tc:'#1f2937'},
+                          {label:'Rating',    cols:['RF_N','RF_X','RF_M ★',`E-Rating (×${eNum})`],  bg:'#e5e7eb',colBg:'#d1d5db',tc:'#1f2937'},
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11344,7 +11351,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                             {TD(f3(p.rfvN),{bg:'#d1d5db',c:rfC(p.rfvN)})}
                             {TD(f3(p.rfvX),{bg:'#d1d5db',c:rfC(p.rfvX)})}
                             {TD(f3(p.rfvM),{bg:'#9ca3af',fw:700,c:rfC(p.rfvM)})}
-                            {TD((()=>{const rv=Math.min(...[p.rfvN,p.rfvM].filter(v=>flt(v)));return flt(rv)?'E-'+(rv*80).toFixed(1):'—'})(),{bg:'#6b7280',fw:700,c:'#fff'})}
+                            {TD((()=>{const rv=Math.min(...[p.rfvN,p.rfvM].filter(v=>flt(v)));return flt(rv)?`E-${(rv*eNum).toFixed(1)}`:'—'})(),{bg:'#6b7280',fw:700,c:'#fff'})}
                           </>);
                         })}
                         </tbody>
@@ -11362,7 +11369,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           {label:'Location',   cols:['Node','Pos (ft)'],                          bg:'#faf5ff'},
                           {label:'Live Load',  cols:['dM_fat (ft-k)','Sx_bot_net (in³)'],         bg:'#f3e8ff',colBg:'#e9d5ff'},
                           {label:'Capacity',   cols:['Mf = SFT×Sx/12 (ft-k)'],                   bg:'#faf5ff',colBg:'#f3e8ff'},
-                          {label:'Rating',     cols:['RF_Fat ★','E-Rating (×80)','⚠'],            bg:'#e9d5ff',colBg:'#d8b4fe',tc:'#581c87'},
+                          {label:'Rating',     cols:['RF_Fat ★',`E-Rating (×${eNum})`,'⚠'],            bg:'#e9d5ff',colBg:'#d8b4fe',tc:'#581c87'},
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11374,7 +11381,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                             {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#e9d5ff'})}
                             {TD(f1(cap),{bg:'#f3e8ff'})}
                             {TD(f3(p.rfFat),{bg:'#d8b4fe',fw:700,c:rfC(p.rfFat)})}
-                            {TD(flt(p.rfFat)?'E-'+(p.rfFat*80).toFixed(1):'—',{bg:'#a855f7',fw:700,c:'#fff'})}
+                            {TD(flt(p.rfFat)?`E-${(p.rfFat*eNum).toFixed(1)}`:'—',{bg:'#a855f7',fw:700,c:'#fff'})}
                             {TD(p.fatAlphaFlag?'⚠ SR>12':'',{c:'#dc2626',fw:700})}
                           </>);
                         })}
@@ -13174,7 +13181,7 @@ function AremaRFChart({ data }) {
     ];
     const traces = series.map(s => {
       const pts = data.filter(p=>p[s.key]!=null&&isFinite(p[s.key]));
-      const eRating = pts.map(p=>'E-'+(p[s.key]*80).toFixed(1));
+      const eRating = pts.map(p=>`E-${(p[s.key]*(typeof eNum!=='undefined'?eNum:80)).toFixed(1)}`);
       return {
         x: pts.map(p=>p.pos),
         y: pts.map(p=>p[s.key]),
