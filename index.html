@@ -315,7 +315,8 @@ function computeEquivMCTSection(sec, zDef) {
 // AREMA LOAD RATING REPORT GENERATOR
 // Opens a formatted engineering report in a new window for printing to PDF.
 // ═══════════════════════════════════════════════════════════════════════════
-function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
+function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings={}}) {
+  const show = k => settings[k] !== false;  // default true if not in settings
   const f = (v,d=2)=>v!=null&&isFinite(v)?Number(v).toFixed(d):'—';
   const rfC = rf=>rf>=1?'#15803d':rf>=0.5?'#d97706':'#dc2626';
   const rfLbl = rf=>isFinite(rf)?(rf>=1?'PASS':'FAIL'):'—';
@@ -446,27 +447,31 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     ${TD((isG?'★ ':'')+'N'+p.node,{align:'left',bold:isG})}${TD(f(p.pos,2))}${TD(f(p.MDL,1))}${cells}</tr>`;
 
   // ─── ASSEMBLE REPORT ───────────────────────────────────────────────────────
+  // CSS extracted to plain string so Babel JSX parser doesn't misread { } as JSX
+  const reportCSS = [
+    '*{box-sizing:border-box;margin:0;padding:0}',
+    'body{font-family:Arial,sans-serif;font-size:9pt;color:#1f2937;background:#fff;padding:0}',
+    '@page{margin:0.75in;size:letter}',
+    '@media print{.pb{page-break-before:always}.no-print{display:none}body{padding:0}}',
+    '@media screen{body{max-width:850px;margin:0 auto;padding:20px}.no-print{margin-bottom:16px}}',
+    'h1{font-size:16pt;margin-bottom:4px}h2{font-size:11pt}h3{font-size:10pt}',
+    'table{border-collapse:collapse;width:100%}',
+    '.cover{text-align:center;padding:60px 40px;border:3px double #1d4ed8;margin-bottom:40px}',
+    '.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:10px}',
+    '.info-row{display:flex;border-bottom:1px solid #e5e7eb;padding:4px 8px;font-size:8.5pt}',
+    '.info-label{color:#6b7280;width:200px;flex-shrink:0;font-weight:600}',
+    '.pass{color:#15803d;font-weight:700}.fail{color:#dc2626;font-weight:700}',
+    '.note{font-size:7.5pt;color:#9ca3af;margin-top:4px;font-style:italic}',
+    '.sum-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}',
+    '.sum-card{padding:12px;border-radius:6px;border:1.5px solid}',
+    '.legend{display:flex;gap:16px;font-size:8pt;font-family:monospace;margin-bottom:6px}',
+    '.leg-item{display:flex;align-items:center;gap:4px}',
+    '.leg-line{width:24px;height:3px;display:inline-block}',
+  ].join('\n    ');
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <title>AREMA Load Rating Report</title>
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:Arial,sans-serif;font-size:9pt;color:#1f2937;background:#fff;padding:0}
-    @page{margin:0.75in;size:letter}
-    @media print{.pb{page-break-before:always}.no-print{display:none}body{padding:0}}
-    @media screen{body{max-width:850px;margin:0 auto;padding:20px}.no-print{margin-bottom:16px}}
-    h1{font-size:16pt;margin-bottom:4px}h2{font-size:11pt}h3{font-size:10pt}
-    table{border-collapse:collapse;width:100%}
-    .cover{text-align:center;padding:60px 40px;border:3px double #1d4ed8;margin-bottom:40px}
-    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:10px}
-    .info-row{display:flex;border-bottom:1px solid #e5e7eb;padding:4px 8px;font-size:8.5pt}
-    .info-label{color:#6b7280;width:200px;flex-shrink:0;font-weight:600}
-    .pass{color:#15803d;font-weight:700}.fail{color:#dc2626;font-weight:700}
-    .note{font-size:7.5pt;color:#9ca3af;margin-top:4px;font-style:italic}
-    .sum-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
-    .sum-card{padding:12px;border-radius:6px;border:1.5px solid}
-    .legend{display:flex;gap:16px;font-size:8pt;font-family:monospace;margin-bottom:6px}
-    .leg-item{display:flex;align-items:center;gap:4px}
-    .leg-line{width:24px;height:3px;display:inline-block}
+    ${reportCSS}
   </style>
   </head><body>
 
@@ -476,13 +481,15 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     <span style="font-size:11px;color:#6b7280;line-height:32px">Use browser Print → Save as PDF for best results. Recommend landscape if tables are wide.</span>
   </div>
 
-  <!-- ═══════════════ COVER PAGE ═══════════════ -->
+  ${show('cover')?`<!-- ═══════════════ COVER PAGE ═══════════════ -->
   <div class="cover">
     <div style="font-size:10pt;color:#6b7280;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px">AREMA Manual for Railway Engineering</div>
     <h1 style="color:#1d4ed8;margin-bottom:4px">LOAD RATING REPORT</h1>
     <div style="font-size:12pt;color:#374151;margin-bottom:24px">Allowable Stress Design — Chapter 15</div>
     <hr style="border:1px solid #dbeafe;margin:16px 0">
     <div style="font-size:13pt;font-weight:700;color:#1f2937;margin:12px 0">${cfg?.projectUser||'Bridge Rating'}</div>
+    ${R2.arema_reportProjectNum?`<div style="font-size:9pt;color:#6b7280">Project No. ${R2.arema_reportProjectNum}</div>`:''}
+    ${R2.arema_reportOwner?`<div style="font-size:9pt;color:#6b7280">${R2.arema_reportOwner}</div>`:''}
     <div style="font-size:10pt;color:#6b7280;margin-bottom:20px">${cfg?.projectDate||today}</div>
     <hr style="border:1px solid #dbeafe;margin:16px 0">
     <div style="font-size:9pt;color:#6b7280;margin-top:20px">
@@ -490,13 +497,57 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
       Method: Allowable Stress Design (ASD) · Net section per §1.5.8 · LTB per §1.12.3
     </div>
     <div style="margin-top:40px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;text-align:left;border:1px solid #dbeafe;padding:16px;border-radius:6px">
-      <div><div style="font-size:8pt;color:#9ca3af">Prepared by</div><div style="height:40px;border-bottom:1px solid #374151;margin-top:8px"></div></div>
+      <div><div style="font-size:8pt;color:#9ca3af">Prepared by</div><div style="height:40px;border-bottom:1px solid #374151;margin-top:8px;font-size:9pt">${R2.arema_reportInspector||''}</div></div>
       <div><div style="font-size:8pt;color:#9ca3af">Reviewed by</div><div style="height:40px;border-bottom:1px solid #374151;margin-top:8px"></div></div>
-      <div><div style="font-size:8pt;color:#9ca3af">Date</div><div style="height:40px;border-bottom:1px solid #374151;margin-top:8px">${today}</div></div>
+      <div><div style="font-size:8pt;color:#9ca3af">Rating Date</div><div style="height:40px;border-bottom:1px solid #374151;margin-top:8px;font-size:9pt">${R2.arema_reportRatingDate||today}</div></div>
     </div>
-  </div>
+  </div>`:''}
 
-  <!-- ═══════════════ SECTION 1: BRIDGE GEOMETRY ═══════════════ -->
+  ${show('toc')?`<!-- ═══════════════ TABLE OF CONTENTS ═══════════════ -->
+  <div style="page-break-after:avoid;margin-bottom:24px;padding:14px 20px;border:1px solid #e5e7eb;border-radius:6px;font-family:monospace">
+    <div style="font-size:11pt;font-weight:700;color:#1d4ed8;margin-bottom:10px;border-bottom:1px solid #e5e7eb;padding-bottom:6px">TABLE OF CONTENTS</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;font-size:9pt">
+      ${['1. Bridge Geometry & Configuration','2. Cross-Section Properties',
+         '3. Allowable Stresses','4. Load Configuration','5. Impact & Lateral Forces',
+         '6. Rating Results Summary','7. RF Envelope','8. Detailed Calculations','9. Node-by-Node Results'].filter((_,i)=>[
+         show('geometry'),show('crossSection'),show('allowables'),show('loadConfig'),
+         show('impactParams'),true,true,show('ratingCalcs'),show('nodeTables')][i]).map((t,i)=>`
+      <div style="padding:3px 0;border-bottom:1px dotted #e5e7eb;color:#374151">${t}</div>`).join('')}
+    </div>
+  </div>`:''}
+
+  <!-- ═══════════════ RATING SUMMARY TABLE ═══════════════ -->
+  ${show('summaryTable')?`
+  <div style="margin-bottom:20px;page-break-inside:avoid">
+    <div style="font-size:11pt;font-weight:700;color:#1f2937;background:#f3f4f6;padding:8px 14px;border-radius:6px 6px 0 0;border:1px solid #e5e7eb;border-bottom:2px solid #1d4ed8">RATING SUMMARY</div>
+    <table style="border-collapse:collapse;width:100%;border:1px solid #e5e7eb;border-top:none">
+      <thead><tr>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:left">Rating Case</th>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:center">RF</th>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:center">E-Rating</th>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:center">Status</th>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:center">Governs @ Node</th>
+        <th style="padding:6px 10px;background:#1d4ed8;color:#fff;font-size:9pt;font-family:monospace;text-align:center">Controls</th>
+      </tr></thead>
+      <tbody>
+      ${[['Normal (Table 15-1-11)','#f0fdf4','#15803d',govN,'gN'],
+         ['Maximum (K·Fb, +CF)','#fff7ed','#c2410c',govX,'gX'],
+         ['Modified (+Wind/Rock/Long)','#fffbeb','#92400e',govM,'gM'],
+         ['Fatigue (§1.7, ASD)','#fdf4ff','#7e22ce',govFat,'rfFat']].map(([lbl,bg,col,g,rfk])=>g?`
+      <tr style="background:${bg}">
+        <td style="padding:6px 10px;font-family:monospace;font-size:9pt;font-weight:700;color:${col}">${lbl}</td>
+        <td style="padding:6px 10px;font-family:monospace;font-size:12pt;font-weight:800;text-align:center;color:${rfC(g[rfk])}">${f(g[rfk],3)}</td>
+        <td style="padding:6px 10px;font-family:monospace;font-size:10pt;font-weight:700;text-align:center;color:${rfC(g[rfk])}">E-${f(g[rfk]*80,1)}</td>
+        <td style="padding:6px 10px;font-family:monospace;font-weight:700;text-align:center" class="${g[rfk]>=1?'pass':'fail'}">${rfLbl(g[rfk])}</td>
+        <td style="padding:6px 10px;font-family:monospace;font-size:8.5pt;text-align:center">N${g.node} @ ${f(g.pos,2)} ft</td>
+        <td style="padding:6px 10px;font-family:monospace;font-size:8.5pt;text-align:center">${g.govN||g.govX||g.govM||'—'}</td>
+      </tr>`:'')
+      .join('')}
+      </tbody>
+    </table>
+  </div>`:''}
+
+  ${show('geometry')?`<!-- ═══════════════ SECTION 1: BRIDGE GEOMETRY ═══════════════ -->
   ${Sec('1. Bridge Geometry &amp; Configuration',{color:'#1d4ed8',bg:'#eff6ff',br:true})}
   <div class="info-grid">
     <div>
@@ -512,9 +563,9 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     </div>
   </div>
   ${Sub('Bridge Elevation Schematic')}
-  ${bridgeSVG}
+  ${bridgeSVG}`:''}
 
-  <!-- ═══════════════ SECTION 2: CROSS-SECTION PROPERTIES ═══════════════ -->
+  ${show('crossSection')?`<!-- ═══════════════ SECTION 2: CROSS-SECTION PROPERTIES ═══════════════ -->
   ${Sec('2. Cross-Section Properties',{color:'#059669',bg:'#f0fdf4',br:true})}
   ${secSVGs.map(({name,svg,sec:s,secInsp,allo:a,zDef:z})=>`
   ${Sub(name+' — Built-Up Section Properties',{color:'#059669'})}
@@ -638,7 +689,38 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
   })()}
   `).join('')}
 
-  <!-- ═══════════════ SECTION 3: ALLOWABLE STRESSES ═══════════════ -->
+  `:''}
+
+  ${show('sectionLoss')&&secSVGs.some(sv=>sv.secInsp)?`
+  <!-- ═══════════════ SECTION: SECTION LOSS SUMMARY ═══════════════ -->
+  ${Sec('2b. Section Loss Summary — Nominal vs As-Inspected',{color:'#b45309',bg:'#fffbeb',br:false})}
+  ${secSVGs.filter(sv=>sv.secInsp).map(({name,sec:sN,secInsp:sI})=>`
+  ${Sub(name,{color:'#b45309'})}
+  <table style="border-collapse:collapse;width:100%;margin-bottom:8px;font-size:8pt;font-family:monospace">
+    <thead><tr>
+      <th style="padding:4px 8px;background:#92400e;color:#fff;text-align:left">Property</th>
+      <th style="padding:4px 8px;background:#92400e;color:#fff;text-align:right">Nominal</th>
+      <th style="padding:4px 8px;background:#92400e;color:#fff;text-align:right">As-Inspected</th>
+      <th style="padding:4px 8px;background:#92400e;color:#fff;text-align:right">Δ</th>
+      <th style="padding:4px 8px;background:#92400e;color:#fff;text-align:right">% Change</th>
+    </tr></thead>
+    <tbody>
+    ${[['IxG (in⁴)',sN.IxG,sI.IxG,0],['IxN (in⁴)',sN.IxN,sI.IxN,0],
+       ['SxTop_gross (in³)',sN.SxTopG,sI.SxTopG,2],['SxBot_net (in³)',sN.SxBotN,sI.SxBotN,2],
+       ['Aw (in²)',sN.Aw,sI.Aw,3],['Total Depth (in)',sN.totalDepth,sI.totalDepth,3]
+      ].map(([lbl,nom,insp,dp],i)=>{
+        const delta=insp-nom, pct=nom?delta/nom*100:0;
+        return `<tr style="background:${i%2?'#fff':'#fffbeb'}">
+          <td style="padding:4px 8px;font-weight:600">${lbl}</td>
+          <td style="padding:4px 8px;text-align:right">${nom!=null?Number(nom).toFixed(dp):'—'}</td>
+          <td style="padding:4px 8px;text-align:right;font-weight:700">${insp!=null?Number(insp).toFixed(dp):'—'}</td>
+          <td style="padding:4px 8px;text-align:right;color:${delta<0?'#dc2626':'#15803d'}">${nom!=null?Number(delta).toFixed(dp):'—'}</td>
+          <td style="padding:4px 8px;text-align:right;color:${delta<0?'#dc2626':'#15803d'}">${nom!=null?pct.toFixed(1)+'%':'—'}</td>
+        </tr>`;}).join('')}
+    </tbody>
+  </table>`).join('')}`:''}
+
+  ${show('allowables')?`<!-- ═══════════════ SECTION 3: ALLOWABLE STRESSES ═══════════════ -->
   ${Sec('3. Allowable Stresses',{color:'#374151',bg:'#f3f4f6',br:true})}
   ${allo?`
   ${Sub('3.1 Normal — AREMA Table 15-1-11',{color:'#15803d'})}
@@ -733,6 +815,24 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     dV_mod = dV + ${f(ap.V_CF_lat,3)} + ${f(ap.V_wind_lat,3)} + ${f(ap.V_rock_lat,3)} k${ap.longLC?' + V_long_node':''}
   </div>
 
+  `:''}
+
+  ${show('loadConfig')?`
+  <!-- ═══ SECTION 4: LOAD CONFIGURATION ═══ -->
+  ${Sec('4. Load Configuration',{color:'#c2410c',bg:'#fff7ed',br:false})}
+  <div class="info-grid" style="margin-bottom:10px">
+    <div>
+      ${[['DC Load Case',R2.arema_dcLC||'—'],['LL Load Case',R2.arema_llLC||'—'],
+         ['Long. LC',R2.arema_longLC||'(none)'],['DL Factor',f(ap.dlFactor,2)]
+        ].map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span style="font-family:monospace">${v}</span></div>`).join('')}
+    </div>
+    <div>
+      ${[['Distribution Factor DF',f(ap.DF,4)],['Girders in Group',ap.DF>0?Math.round(1/ap.DF).toString():'—'],
+         ['Rating Vehicle','AREMA E-80 (Cooper E)'],['Rating Method','ASD — Allowable Stress']
+        ].map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span style="font-family:monospace">${v}</span></div>`).join('')}
+    </div>
+  </div>`:''}
+
   <!-- ═══════════════ SECTION 6: RATING RESULTS SUMMARY ═══════════════ -->
   ${Sec('6. Rating Results — Summary',{color:'#374151',bg:'#f3f4f6',br:true})}
   <div class="sum-grid">
@@ -774,7 +874,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
   </div>
   ${envelopeSVG}
 
-  <!-- ═══════════════ SECTION 8: DETAILED CALCULATIONS ═══════════════ -->
+  ${show('ratingCalcs')?`<!-- ═══════════════ SECTION 8: DETAILED CALCULATIONS ═══════════════ -->
   ${Sec('8. Detailed Calculations at Governing Nodes',{color:'#1d4ed8',bg:'#eff6ff',br:true})}
 
   ${Sub('8.1 Section Properties at Governing Node (Normal)',{color:'#15803d'})}
@@ -814,12 +914,15 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
     RF_Fat = ${f(govFat.rfFat,3)} — ${rfLbl(govFat.rfFat)}
   </div>`:''}
 
-  <!-- ═══════════════ SECTION 9: NODE-BY-NODE RESULTS ═══════════════ -->
+
+  `:''}  <!-- closes show('ratingCalcs') -->
+
+  ${show('nodeTables')?`<!-- ═══════════════ SECTION 9: NODE-BY-NODE RESULTS ═══════════════ -->
   ${Sec('9. Node-by-Node Rating Results',{color:'#374151',bg:'#f3f4f6',br:true})}
   <p class="note" style="margin-bottom:10px">All moment values in ft-kips · All shear values in kips · ★ = governing node (minimum RF) · RF = (Capacity − MDL) / denom</p>
 
   ${mkNodeTable('9.1 Normal Flexure (AREMA Table 15-1-11)','#15803d','#f0fdf4',
-    ['denom_N (ft-k)','Mc_N (ft-k)','RF_comp_N','Mt_N (ft-k)','RF_tens_N','RF_N','fDL_top(ksi)','fLL_top(ksi)','Fb_N(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_N(ksi)'],
+    ['denom_N (ft-k)','Mc_N (ft-k)','RF_comp_N','Mt_N (ft-k)','RF_tens_N','RF_N','fDL_top','fLL_top','Fb_N','fDL_bot','fLL_bot','Ft_N','E-Rating'],
     (p)=>{
       const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
       return nodeRow(p,govN?.node===p.node,
@@ -827,28 +930,31 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
         TD(f(p.MtN,1),{bg:'#f0fdf4'})+TD(f(p.rftN,3),{color:rfC(p.rftN)})+
         TD(f(p.gN,3),{bg:'#dcfce7',bold:true,color:rfC(p.gN)})+
         TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomN,p.sec?.SxTopG))+TD(f(p.allo?.Fb_N,2),{bold:true})+
-        TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_N,2),{bold:true}));
+        TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_N,2),{bold:true})+
+        TD(p.gN!=null&&isFinite(p.gN)?'E-'+f(p.gN*80,1):'—',{bold:true,color:rfC(p.gN)}));
     })}
 
   ${mkNodeTable('9.2 Maximum Flexure (K-factor, +CF in denom)','#c2410c','#fff7ed',
-    ['denom_N (ft-k)','Mc_X (ft-k)','RF_comp_X','Mt_X (ft-k)','RF_tens_X','RF_X','fDL_top(ksi)','fLL_top(ksi)','Fb_X(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_X(ksi)'],
+    ['denom_N (ft-k)','Mc_X (ft-k)','RF_comp_X','Mt_X (ft-k)','RF_tens_X','RF_X','fDL_top','fLL_top','Fb_X','fDL_bot','fLL_bot','Ft_X','E-Rating'],
     (p)=>{const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
      return nodeRow(p,govX?.node===p.node,
       TD(f(p.denomN,1))+TD(f(p.McX,1),{bg:'#fff7ed'})+TD(f(p.rfcX,3),{color:rfC(p.rfcX)})+
       TD(f(p.MtX,1),{bg:'#fff7ed'})+TD(f(p.rftX,3),{color:rfC(p.rftX)})+
       TD(f(p.gX,3),{bg:'#fed7aa',bold:true,color:rfC(p.gX)})+
       TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomN,p.sec?.SxTopG))+TD(f(p.allo?.Fb_X,2),{bold:true})+
-      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true}));
+      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomN,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true})+
+      TD(p.gX!=null&&isFinite(p.gX)?'E-'+f(p.gX*80,1):'—',{bold:true,color:rfC(p.gX)}));
     })}
   ${mkNodeTable('9.3 Modified Flexure (K-factor, all lateral in denom)','#92400e','#fffbeb',
-    ['denom_Mod (ft-k)','Mc_X (ft-k)','RF_comp_M','Mt_X (ft-k)','RF_tens_M','RF_M','fDL_top(ksi)','fLL_top(ksi)','Fb_X(ksi)','fDL_bot(ksi)','fLL_bot(ksi)','Ft_X(ksi)'],
+    ['denom_Mod (ft-k)','Mc_X (ft-k)','RF_comp_M','Mt_X (ft-k)','RF_tens_M','RF_M','fDL_top','fLL_top','Fb_X','fDL_bot','fLL_bot','Ft_X','E-Rating'],
     (p)=>{const fsk=(M,S)=>(M&&S&&isFinite(M)&&isFinite(S))?(M*12/S).toFixed(2):'—';
      return nodeRow(p,govM?.node===p.node,
       TD(f(p.denomMod,1))+TD(f(p.McX,1),{bg:'#fffbeb'})+TD(f(p.rfcM,3),{color:rfC(p.rfcM)})+
       TD(f(p.MtX,1),{bg:'#fffbeb'})+TD(f(p.rftM,3),{color:rfC(p.rftM)})+
       TD(f(p.gM,3),{bg:'#fef3c7',bold:true,color:rfC(p.gM)})+
       TD(fsk(p.MDL,p.sec?.SxTopG))+TD(fsk(p.denomMod,p.sec?.SxTopG))+TD(f(p.allo?.Fb_X,2),{bold:true})+
-      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomMod,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true}));
+      TD(fsk(p.MDL,p.sec?.SxBotN))+TD(fsk(p.denomMod,p.sec?.SxBotN))+TD(f(p.allo?.Ft_X,2),{bold:true})+
+      TD(p.gM!=null&&isFinite(p.gM)?'E-'+f(p.gM*80,1):'—',{bold:true,color:rfC(p.gM)}));
     })}
 
   ${mkNodeTable('9.4 Shear — All Cases','#374151','#f3f4f6',
@@ -859,12 +965,30 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat}) {
       TD(f(p.dV_mod,1),{bg:'#fffbeb'})+TD(f(p.rfvM,3),{color:rfC(p.rfvM)})))}
 
   ${mkNodeTable('9.5 Fatigue — Stress Range (AREMA §1.7)','#7e22ce','#fdf4ff',
-    ['dM_fat (ft-k)','Sx_bot_net (in³)','Mf=SFT×Sx/12 (ft-k)','RF_Fat','⚠'],
+    ['dM_fat (ft-k)','Sx_bot_net (in³)','Mf=SFT×Sx/12 (ft-k)','RF_Fat','E-Rating','⚠'],
     (p)=>nodeRow(p,govFat?.node===p.node,
       TD(f(p.dM_fat,2),{bg:'#f9fafb'})+TD(f(p.sec?.SxBotN,2),{bg:'#fdf4ff'})+
       TD(f(ap.SFT*(p.sec?.SxBotN||0)/12,1),{bg:'#fdf4ff'})+
       TD(f(p.rfFat,3),{bg:'#f3e8ff',bold:true,color:rfC(p.rfFat)})+
+      TD(p.rfFat!=null&&isFinite(p.rfFat)?'E-'+f(p.rfFat*80,1):'—',{bold:true,color:rfC(p.rfFat)})+
       TD(p.fatAlphaFlag?'⚠ SR>12':'',{color:'#dc2626',bold:true})))}
+
+  `:''}
+
+  ${show('notes')&&(R2.arema_reportNotes||'').trim()?`
+  <!-- ═══════════════ NOTES & ASSUMPTIONS ═══════════════ -->
+  ${Sec('Notes & Assumptions',{color:'#374151',bg:'#f3f4f6',br:false})}
+  <div style="padding:10px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:4px;
+    font-size:9pt;font-family:Arial,sans-serif;white-space:pre-wrap;line-height:1.6">
+    ${(R2.arema_reportNotes||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+  </div>
+  <div style="margin-top:8px;padding:8px 12px;background:#f8fafc;border:1px solid #e5e7eb;
+    border-radius:4px;font-size:8pt;color:#6b7280;font-family:monospace">
+    Standard Notes: (1) Rating performed per AREMA Manual for Railway Engineering, Chapter 15.
+    (2) Material properties per ASTM A36 unless otherwise noted.
+    (3) Net section computed per AREMA §1.5.8; standard bolt hole diameter assumed.
+    (4) Impact computed per AREMA §1.3.1. (5) LTB check per AREMA §1.12.3.
+  </div>`:''}
 
   <!-- Footer -->
   <div style="margin-top:24px;padding:10px 14px;border-top:2px solid #e5e7eb;font-size:7.5pt;color:#9ca3af;font-family:monospace">
@@ -10017,11 +10141,12 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     <strong>🚂 AREMA Ch.15 ASD Rating</strong> &nbsp;·&nbsp;
                     Normal (Table 15-1-11) · Maximum &amp; Modified (Table 15-7-1, K=0.80Fy) · Fatigue (§1.7)
                   </div>
-                  {aremaAsdData.length>0&&govAsdN&&(
+                  {aremaAsdData.length>0&&govAsdN&&(<>
                   <button onClick={()=>{
                     const html=generateAremaReport({
                       cfg, ap:_aremaParams, data:aremaAsdData,
-                      govN:govAsdN, govX:govAsdX, govM:govAsdM, govFat:govAsdFat
+                      govN:govAsdN, govX:govAsdX, govM:govAsdM, govFat:govAsdFat,
+                      settings: cfg.rating?.arema_reportSections,
                     });
                     const w=window.open('','_blank','width=960,height=900');
                     if(w){w.document.write(html);w.document.close();}
@@ -10030,7 +10155,8 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                     fontWeight:'600',flexShrink:0}}>
                     📄 Print AREMA Report
                   </button>
-                  )}
+                  <AremaReportSettingsPanel cfg={cfg} updRating={updRating}/>
+                  </>)}
                 </div>
                 {!hasAremaZone&&(
                   <div style={{padding:'20px',textAlign:'center',background:'#fffbeb',
@@ -10350,7 +10476,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                   <div style={{background:'#eff6ff',border:'2px solid #93c5fd',borderRadius:'8px',
                     padding:'10px 16px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
                     <div style={{fontSize:'10px',fontFamily:'monospace',fontWeight:'700',color:'#1d4ed8',whiteSpace:'nowrap'}}>
-                      📍 Calc Sheet Location
+                      📍 User Defined Rating Location
                     </div>
                     <input type="number" value={aremaCalcX} step="0.25" min="0"
                       placeholder={`governing @ ${govAsdN?.pos.toFixed(2)||'?'} ft`}
@@ -10714,6 +10840,16 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                                  pos:midPos, mechs:['FLEXURE']});
                       base.sort((a,b)=>a.pos-b.pos);
                     }
+                    // Inject user-defined rating location if set
+                    const _udPos = aremaCalcX!==''&&aremaCalcX!=null ? parseFloat(aremaCalcX) : null;
+                    if (_udPos!=null && isFinite(_udPos) && _udPos>=0) {
+                      const alreadyClose = base.some(l=>Math.abs(l.pos-_udPos)<0.1);
+                      if (!alreadyClose) {
+                        base.push({id:'user', label:`📍 USER DEFINED @ ${_udPos.toFixed(2)} ft`,
+                                   pos:_udPos, mechs:['FLEXURE','SHEAR'], userDefined:true});
+                        base.sort((a,b)=>a.pos-b.pos);
+                      }
+                    }
                     return base;
                   })();
 
@@ -10733,6 +10869,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         ? `@ SHEAR AT SUPPORT`
                         : `@ ${loc.pos.toFixed(2)}ft (${loc.label})`;
                       const desc = `${girderLabel} ${posLabel} (${mech})`;
+                      const isUserDefined = !!loc.userDefined;
                       // Per-vehicle values
                       const vals = vehicles.map(veh=>{
                         const r = interpVeh(veh.allNodeRes, loc.pos);
@@ -10748,7 +10885,7 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                           rfFat: isShear?null:r.rfFat,  // fatigue is moment-based only
                         };
                       });
-                      return {desc, mech, pos:loc.pos, vals};
+                      return {desc, mech, pos:loc.pos, vals, isUserDefined};
                     });
                   });
 
@@ -10815,13 +10952,14 @@ function StepResults({ cfg, set, rows: origRows, setRows, rawText, setRawText, m
                         <tbody>
                           {allRows.map((row,ri)=>{
                             const isCtrl = ri === ctrlIdx;
+                            const isUD   = !!row.isUserDefined;
                             return (
-                              <tr key={ri} style={{background:ri%2===0?'#fff':'#fafafa'}}>
+                              <tr key={ri} style={{background:isUD?'#fef3c7':ri%2===0?'#fff':'#fafafa'}}>
                                 <td style={{border:'1px solid #d1d5db',padding:'4px 8px',
-                                  fontWeight: isCtrl?'700':'500',
-                                  color: isCtrl?'#111827':'#374151',
+                                  fontWeight: isCtrl||isUD?'700':'500',
+                                  color: isUD?'#b45309':isCtrl?'#111827':'#374151',
                                   fontSize:'9px',
-                                  background: isCtrl?'#f8faff':undefined}}>
+                                  background: isUD?'#fef3c7':isCtrl?'#f8faff':undefined}}>
                                   {isCtrl && <span style={{marginRight:'4px',color:'#6366f1'}}>▶</span>}
                                   {row.desc}
                                 </td>
@@ -12232,6 +12370,11 @@ const DEFAULT_CFG = {
     arema_curveR:0, arema_curveV:0,
     arema_fatCat:'D', arema_fatAlpha:0.85, arema_fatBeta:0.15, arema_mod:true,
     arema_dcLC:'', arema_llLC:'', arema_longLC:'', arema_dlFactor:1.0,
+    arema_reportProjectNum:'', arema_reportOwner:'', arema_reportInspector:'', arema_reportRatingDate:'',
+    arema_reportNotes:'',
+    arema_reportSections:{cover:true,toc:true,summaryTable:true,geometry:true,
+      crossSection:true,allowables:true,loadConfig:true,impactParams:true,
+      sectionLoss:true,ratingCalcs:true,nodeTables:true,notes:true},
     arema_track_offset:0, arema_long_L_ref:0,
     // Fatigue
     fatigueLCpos:'', fatigueLCneg:'',
@@ -12940,6 +13083,74 @@ function SavesModal({ cfg, onLoad, onClose,
         </div>
       </div>
     </div>
+  );
+}
+
+function AremaReportSettingsPanel({ cfg, updRating }) {
+  const RS = cfg.rating?.arema_reportSections || {};
+  const updRS = (key,val) => updRating('arema_reportSections',{...RS,[key]:val});
+  const SECTS = [
+    ['cover','Cover Page'],['toc','Table of Contents'],
+    ['summaryTable','Rating Summary Table'],['geometry','Bridge Geometry'],
+    ['crossSection','Cross-Section Properties'],['allowables','Allowable Stresses'],
+    ['loadConfig','Load Configuration'],['impactParams','Impact & Fatigue Params'],
+    ['sectionLoss','Section Loss Summary'],['ratingCalcs','Detailed Calculations'],
+    ['nodeTables','Node-by-Node Tables'],['notes','Notes & Assumptions'],
+  ];
+  return (
+    <details style={{marginTop:'8px',border:'1px solid #bfdbfe',borderRadius:'6px',overflow:'hidden'}}>
+      <summary style={{padding:'6px 12px',background:'#eff6ff',cursor:'pointer',
+        fontSize:'11px',fontWeight:'700',color:'#1d4ed8',listStyle:'none',
+        display:'flex',alignItems:'center',gap:'6px'}}>
+        ⚙ Report Settings
+        <span style={{fontSize:'9px',fontWeight:'400',color:'#6b7280',marginLeft:'auto'}}>
+          {Object.values(RS).filter(v=>v!==false).length || SECTS.length}/{SECTS.length} sections
+        </span>
+      </summary>
+      <div style={{padding:'10px 12px',background:'#f8faff'}}>
+        {/* Section toggles */}
+        <div style={{fontSize:'9px',fontFamily:'monospace',fontWeight:'700',color:'#374151',marginBottom:'5px'}}>
+          SECTIONS TO INCLUDE
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'3px 12px',marginBottom:'10px'}}>
+          {SECTS.map(([key,lbl])=>(
+            <label key={key} style={{display:'flex',alignItems:'center',gap:'4px',
+              cursor:'pointer',fontSize:'9.5px',fontFamily:'monospace',
+              color:RS[key]===false?'#9ca3af':'#1d4ed8',fontWeight:RS[key]===false?'400':'600'}}>
+              <input type="checkbox" checked={RS[key]!==false}
+                onChange={e=>updRS(key,e.target.checked)}
+                style={{accentColor:'#1d4ed8',width:'11px',height:'11px',cursor:'pointer'}}/>
+              {lbl}
+            </label>
+          ))}
+        </div>
+        {/* Cover page fields */}
+        <div style={{fontSize:'9px',fontFamily:'monospace',fontWeight:'700',color:'#374151',marginBottom:'5px'}}>
+          COVER PAGE FIELDS
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px',marginBottom:'10px'}}>
+          {[['arema_reportProjectNum','Project No.'],['arema_reportOwner','Bridge Owner'],
+            ['arema_reportInspector','Inspector / Engineer'],['arema_reportRatingDate','Rating Date']].map(([key,lbl])=>(
+            <div key={key} style={{display:'flex',flexDirection:'column',gap:'2px'}}>
+              <span style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',fontWeight:'600'}}>{lbl}</span>
+              <input type="text" value={cfg.rating?.[key]||''} placeholder={lbl}
+                onChange={e=>updRating(key,e.target.value)}
+                style={{fontSize:'9px',fontFamily:'monospace',padding:'3px 6px',
+                  border:'1px solid #bfdbfe',borderRadius:'3px',background:'#fff',width:'100%'}}/>
+            </div>
+          ))}
+        </div>
+        {/* Notes */}
+        <div style={{fontSize:'9px',fontFamily:'monospace',fontWeight:'700',color:'#374151',marginBottom:'4px'}}>
+          NOTES & ASSUMPTIONS
+        </div>
+        <textarea rows={3} value={cfg.rating?.arema_reportNotes||''}
+          placeholder="Enter project-specific notes, assumptions, or special conditions..."
+          onChange={e=>updRating('arema_reportNotes',e.target.value)}
+          style={{width:'100%',fontSize:'9px',fontFamily:'monospace',padding:'5px',
+            border:'1px solid #bfdbfe',borderRadius:'3px',resize:'vertical',background:'#fff'}}/>
+      </div>
+    </details>
   );
 }
 
