@@ -975,6 +975,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
       TD(p.rfFat!=null&&isFinite(p.rfFat)?f(p.rfFat*80,1)+'':'—',{bold:true,color:rfC(p.rfFat)})+
       TD(p.fatAlphaFlag?'⚠ SR>12':'',{color:'#dc2626',bold:true})))}
 
+
   `:''}
 
   ${show('notes')&&(R2.arema_reportNotes||'').trim()?`
@@ -1007,6 +1008,9 @@ function generateMCT(cfg) {
     movingLoadCode,selectedVehicles,vehicleDLA,useGlobalDLA,globalDLA,
     laneName,laneWidth,laneWheelSpacing,sectionZones,
     projectName,projectBridgeId,projectClient,projectDesc,projectRevision,projectAddress } = cfg;
+
+  // Ensure laneName has a default value (fix for MIDAS MCT import error)
+  const safeLaneName = (laneName || '').trim() || 'Lane 1';
 
   // Resolve dead loads — support both new deadLoads array and legacy fields
   const deadLoads = (() => {
@@ -1236,7 +1240,7 @@ function generateMCT(cfg) {
   p(`*MVLDCODE    ; Moving Load Code`,`; CODE=CODE`,`   CODE=${movingLoadCode}`,``);
   p(`*LINELANE    ; Traffic Line Lanes`,
     `; NAME=NAME, LDIST, GROUP, SKEWS, SKEWE, MOVING, LW, WS, bLANEOPT, ALLOWWIDTH`,
-    `   NAME=${laneName}, LANE, , 0, 0, BOTH, ${laneWidth}, ${laneWheelSpacing}, NO, ${laneWidth}`);
+    `   NAME=${safeLaneName}, LANE, , 0, 0, BOTH, ${laneWidth}, ${laneWheelSpacing}, NO, ${laneWidth}`);
   const le=[];
   for(let e=0;e<totalElems;e++){
     const bStart=isSpanBnd(finalXs[e])?'YES':'NO';
@@ -1287,16 +1291,16 @@ function generateMCT(cfg) {
   // *MVLDCASE — all vehicles including longitudinal moving load
     p(`*MVLDCASE   ; Moving Load Cases`);
     activeVehicles.forEach(v=>{
-      p(`   NAME=${v.name}_${laneName}, 0, 1, 1, 1, 1, 1, 1, INDEPENDENT, , 0, NO, 0`);
+      p(`   NAME=${v.name}_${safeLaneName}, 0, 1, 1, 1, 1, 1, 1, INDEPENDENT, , 0, NO, 0`);
       p(`        1, 1, 1, 1, 1, 0.5, 0.25`);
-      p(`        VL, ${v.name}, 1, 0, 1, ${laneName}`);
+      p(`        VL, ${v.name}, 1, 0, 1, ${safeLaneName}`);
     });
     p(``);
     const mvColors=["255, 0, 192","148, 87, 255","210, 210, 210","255, 192, 87","0, 192, 128","192, 0, 255","255, 87, 0","0, 128, 255","128, 0, 255","255, 128, 0"];
     const stColors=["0, 128, 57","192, 0, 192","255, 87, 128","0, 128, 255","163, 160, 255"];
     p(`*LC-COLOR    ; Diagram Color for Load Case`);
     activeLCs.forEach((lc,i)=>{const c=stColors[i]||"128,128,128";p(` ST, ${lc}, ${c}, ${c}, ${c}`);});
-    activeVehicles.forEach((v,i)=>{const c=mvColors[i%mvColors.length];p(` MV, ${v.name}_${laneName}, ${c}, ${c}, ${c}`);});
+    activeVehicles.forEach((v,i)=>{const c=mvColors[i%mvColors.length];p(` MV, ${v.name}_${safeLaneName}, ${c}, ${c}, ${c}`);});
     p(``);
     p(`*MOVE-CTRL    ; Moving Load Analysis Control`,
       `; METHOD, POINT, iIGP, iIGPN/DIST, MATTYPE, BRIDGETYPE, AKMATTYPE, AKBRIDGETYPE, MINFACTS2, PLATE, bSTRCALC, bCONCURRENT, bCONCLINK, FRAME, bCSTRCALC, bREAC, bRG, RGN, bDISP, bDG, DGN, bFM, bFG, FGN, bL, bLG, LGN, MAXV, INCV, MAXSPACE`,
@@ -1324,7 +1328,7 @@ function generateMCT(cfg) {
       // Term-based: individual load cases with per-case factors
       // Guard: only include ST terms whose load case was actually written to *STLDCASE,
       // and MV terms whose vehicle case was actually written to *MVLDCASE.
-      const activeMVNames = new Set(activeVehicles.map(v=>`${v.name}_${laneName}`));
+      const activeMVNames = new Set(activeVehicles.map(v=>`${v.name}_${safeLaneName}`));
       allParts = combo.terms
         .filter(t => t.lc && t.factor !== 0 && (
           t.type === 'MV'
@@ -1343,7 +1347,7 @@ function generateMCT(cfg) {
         .filter(({f})=>f!==0)
         .map(({lc,f})=>`ST, ${lc}, ${f}`);
       const mvParts = llF!==0 && activeVehicles.length
-        ? activeVehicles.map(v=>`MV, ${v.name}_${laneName}, ${llF}`)
+        ? activeVehicles.map(v=>`MV, ${v.name}_${safeLaneName}, ${llF}`)
         : [];
       allParts = [...stParts, ...mvParts];
     }
@@ -1390,7 +1394,7 @@ function BridgeSchematic({spans, elemsPerSpan, sectionZones}) {
   const extraNodes = finalXs.length - 1 - spans.length*elemsPerSpan;
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'100%'}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={STYLES.fullSize}>
       {/* Grid */}
       {Array.from({length:31}).map((_,i)=>(<line key={`v${i}`} x1={i*21} y1={0} x2={i*21} y2={H} stroke="#e8edf4" strokeWidth="0.5"/>))}
       {Array.from({length:6}).map((_,i)=>(<line key={`h${i}`} x1={0} y1={i*20} x2={W} y2={i*20} stroke="#e8edf4" strokeWidth="0.5"/>))}
@@ -1448,6 +1452,104 @@ const INP={background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',color
   fontFamily:"'IBM Plex Sans',system-ui,sans-serif",transition:'border-color 0.15s'};
 const INP2={...INP,padding:'5px 8px',fontSize:'12px'}; // compact variant used in tables/grids
 const SEC_COLORS=['#1d4ed8','#dc2626','#7c3aed','#059669','#ea580c','#0891b2','#be123c','#b45309','#374151'];
+
+// ─── PHASE 1 OPTIMIZATION: Centralized Style Constants ────────────────────────
+const STYLES = {
+  // Common text styles
+  monoSmall: {fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'},
+  monoTiny: {fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'},
+  monoTiny2: {fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'},
+  monoMed: {fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'},
+  monoMed2: {fontSize:'10px',color:'#9ca3af',fontFamily:'monospace'},
+  dimText: {color:'#9ca3af'},
+  grayText: {color:'#6b7280'},
+  blueText: {color:'#1d4ed8'},
+  
+  // Layout & spacing
+  fullScroll: {overflowX:'auto'},
+  padding5: {padding:'5px 8px'},
+  padding3: {padding:'3px 5px'},
+  center: {textAlign:'center'},
+  fullSize: {width:'100%',height:'100%'},
+  
+  // Table & grid styles
+  bgLight: {background:'#f9fafb'},
+  bgGray: {background:'#f3f4f6'},
+  bgWhite: {background:'#fff'},
+  tableBorder: {borderBottom:'1px solid #f3f4f6'},
+  tableCell: {padding:'3px 6px',border:'1px solid #e5e7eb',textAlign:'right'},
+  tableHeader: {padding:'3px',border:'1px solid #e5e7eb'},
+  tableCompact: {width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'},
+  tableWrapped: {border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'},
+  
+  // Component styles
+  monoBold: {fontFamily:'monospace',fontWeight:'600',fontSize:'11px'},
+  monoInput: {fontFamily:'monospace',fontWeight:'600',fontSize:'11px'},
+  
+  // Utilities
+  padding5blue: {padding:'5px 8px',color:'#1d4ed8'},
+  hintText: {fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',marginBottom:'2px'},
+};
+
+// ─── PHASE 1: Reusable Components ──────────────────────────────────────────────
+function TableHeader({cols}) {
+  return (
+    <thead style={STYLES.bgGray}>
+      <tr>
+        {cols.map(c => (
+          <th key={c.key} style={{padding:'3px',border:'1px solid #e5e7eb',...(c.style||{})}}>
+            {c.label}
+          </th>
+        ))}
+      </tr>
+    </thead>
+  );
+}
+
+function FormField({label, value, onChange, type='text', hint='', style={}}) {
+  return (
+    <div style={{marginBottom:'8px'}}>
+      {label && <label style={{display:'block',marginBottom:'3px',fontSize:'12px',fontWeight:'500'}}>{label}</label>}
+      <input 
+        type={type} 
+        value={value} 
+        onChange={e => onChange(e.target.value)}
+        style={{...INP,...style}}
+      />
+      {hint && <div style={STYLES.hintText}>{hint}</div>}
+    </div>
+  );
+}
+
+function ComponentLossInputs({comp, id, onChange}) {
+  if (!comp.on) return null;
+  const losses = [
+    {key:'lossW', label:'Loss W', hint:'Width loss'},
+    {key:'lossHt', label:'Loss Ht', hint:'Height loss'},
+    {key:'lossTH', label:'Loss TH', hint:'Thickness H loss'},
+    {key:'lossTV', label:'Loss TV', hint:'Thickness V loss'}
+  ];
+  return (
+    <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'4px',fontSize:'11px'}}>
+      {losses.map(l => (
+        <div key={l.key}>
+          <label style={{display:'block',fontSize:'8px',color:'#6b7280',marginBottom:'2px'}}>{l.label}</label>
+          <input 
+            type="number" 
+            step="0.01" 
+            value={comp[l.key]||0}
+            onChange={e => onChange(id, l.key, e.target.value)}
+            style={{...INP2,fontSize:'10px'}}
+            placeholder="0"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+
+
 
 function Field({label,hint,children}) {
   return (<div style={{marginBottom:'14px'}}>
@@ -1943,7 +2045,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
           {[['Out-to-out (in)','outToOut',42,'0.0625'],['Fy (ksi)','Fy',36,'1'],
             ['Unbraced L (in)','unbracedL',240,'1'],['L/r (0=auto)','ryc',0,'0.001']].map(([lbl,k,def,step])=>(
             <div key={k}>
-              <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+              <div style={STYLES.monoTiny2}>{lbl}</div>
               <input type="number" step={step} style={{...INP,fontFamily:'monospace',fontWeight:'600'}}
                 value={k==='ryc'?(cur.autoRyc!==false?'':(cur.ryc??'')):(cur[k]??def)}
                 placeholder={k==='ryc'?(curSec?('auto '+curSec.ryc.toFixed(2)+'"'):'auto'):''}
@@ -2320,7 +2422,7 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
 
       {AS.zonesEnabled&&zones.length>0&&(
       <table style={{borderCollapse:'collapse',width:'100%',fontSize:'10.5px',fontFamily:'monospace'}}>
-        <thead><tr style={{background:'#f3f4f6'}}>
+        <thead><tr style={STYLES.bgGray}>
           {['Label','Start X (ft)','End X (ft)','Section',''].map(h=>(
             <th key={h} style={{padding:'4px 6px',border:'1px solid #e5e7eb',
               textAlign:h==='Label'?'left':'center',fontSize:'9.5px',color:'#374151'}}>{h}</th>
@@ -2331,22 +2433,22 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
             const assignedSec = library.find(s=>s.id===z.sectionId);
             return (
               <tr key={z.id} style={{background:zi%2===0?'#fff':'#f9fafb'}}>
-                <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>
+                <td style={STYLES.padding3}>
                   <input value={z.label||''} placeholder={'Zone '+(zi+1)}
                     style={{...INP2,width:'100%',fontFamily:'monospace',fontSize:'10px',fontWeight:'600'}}
                     onChange={e=>updZone(zi,{label:e.target.value})}/>
                 </td>
-                <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>
+                <td style={STYLES.padding3}>
                   <input type="number" step="1" style={{...INP2,width:'70px',textAlign:'right',fontFamily:'monospace'}}
                     value={z.startX??0}
                     onChange={e=>{const v=e.target.value;if(v===''||v.endsWith('.'))return;const n=parseFloat(v);if(!isNaN(n))updZone(zi,{startX:n});}}/>
                 </td>
-                <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>
+                <td style={STYLES.padding3}>
                   <input type="number" step="1" style={{...INP2,width:'70px',textAlign:'right',fontFamily:'monospace'}}
                     value={z.endX??totalLen}
                     onChange={e=>{const v=e.target.value;if(v===''||v.endsWith('.'))return;const n=parseFloat(v);if(!isNaN(n))updZone(zi,{endX:n});}}/>
                 </td>
-                <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>
+                <td style={STYLES.padding3}>
                   <select style={{...INP2,fontFamily:'monospace',fontSize:'10px',width:'100%'}}
                     value={z.sectionId||''}
                     onChange={e=>updZone(zi,{sectionId:e.target.value})}>
@@ -2489,10 +2591,10 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
           </div>
 
           {/* Properties table */}
-          <div style={{overflowX:'auto'}}>
+          <div style={STYLES.fullScroll}>
             <table style={{borderCollapse:'collapse',width:'100%',fontSize:'9px',fontFamily:'monospace'}}>
               <thead>
-                <tr style={{background:'#f3f4f6'}}>
+                <tr style={STYLES.bgGray}>
                   {['X Range (ft)','Section','Depth (in)','Ix gross (in⁴)','A gross (in²)','Aw (in²)',
                     'MIDAS Equiv — D × B × tf × tw (in)'].map(h=>(
                     <th key={h} style={{padding:'4px 6px',border:'1px solid #e5e7eb',
@@ -3057,7 +3159,7 @@ function StepLoads({cfg,set}) {
         <span/>
         <span/>
         <span>Load Case Name <span style={{color:'#bfdbfe'}}>(written verbatim to MCT)</span></span>
-        <span style={{textAlign:'center'}}>Type</span>
+        <span style={STYLES.center}>Type</span>
         <span style={{textAlign:'right',paddingRight:'8px'}}>Value (k/ft)</span>
         <span/>
       </div>
@@ -3071,7 +3173,7 @@ function StepLoads({cfg,set}) {
           <div style={{fontSize:'12.5px',fontWeight:'500',color:'#374151',fontFamily:'monospace'}}>Selfweight</div>
           <div style={{fontSize:'9.5px',color:'#9ca3af',fontFamily:'monospace'}}>Always included via *SELFWEIGHT — gravity −Z</div>
         </div>
-        <div style={{textAlign:'center'}}>
+        <div style={STYLES.center}>
           <span style={{fontSize:'9.5px',background:'#dbeafe',color:'#1e40af',padding:'2px 7px',borderRadius:'99px',fontFamily:'monospace',fontWeight:'600'}}>DC</span>
         </div>
         <div style={{textAlign:'right',paddingRight:'8px',fontSize:'12px',fontFamily:'monospace',color:'#9ca3af'}}>auto</div>
@@ -3110,7 +3212,7 @@ function StepLoads({cfg,set}) {
               value={d.name} onChange={e=>updateLoad(d.id,'name',e.target.value)}
               title="This name is used verbatim in the MCT *STLDCASE block"/>
             {/* Type */}
-            <div style={{textAlign:'center'}}>
+            <div style={STYLES.center}>
               <select value={d.type==='DC'?'DC1':d.type} onChange={e=>updateLoad(d.id,'type',e.target.value)}
                 style={{...INP2,padding:'4px 6px',fontSize:'11px',fontWeight:'700',
                   color:typeText,background:typeBg,border:`1px solid ${typeColor}40`,width:'70px',textAlign:'center'}}>
@@ -3281,7 +3383,7 @@ function StepMovingLoads({cfg,set}) {
             textTransform:'uppercase',letterSpacing:'0.06em'}}>
             <span/>
             <span>Vehicle</span>
-            <span style={{textAlign:'center'}}>DLA&nbsp;(%)</span>
+            <span style={STYLES.center}>DLA&nbsp;(%)</span>
           </div>
           {VEHICLE_GROUPS.map(grp=>{
             const allSel=grp.vehicles.every(v=>cfg.selectedVehicles.includes(v.name));
@@ -3503,7 +3605,7 @@ function StepMovingLoads({cfg,set}) {
                       <table style={{width:'100%',borderCollapse:'collapse',
                         fontSize:'9.5px',fontFamily:'monospace'}}>
                         <thead>
-                          <tr style={{background:'#f3f4f6'}}>
+                          <tr style={STYLES.bgGray}>
                             {['Axle','Load (kips)','Load (lbs)','Dist (ft)','Spacing (ft)'].map(h=>(
                               <th key={h} style={{padding:'3px 8px',
                                 textAlign:h==='Axle'?'center':'right',fontWeight:'500',
@@ -3752,7 +3854,7 @@ function StepCombos({cfg,set}) {
                       <span key={t._key||t.lc||ti} style={{fontSize:'10.5px',fontFamily:'monospace',
                         background:'#f3f4f6',color:'#374151',padding:'2px 8px',borderRadius:'4px',
                         border:'1px solid #e5e7eb'}}>
-                        {t.lc} <span style={{color:'#9ca3af'}}>×{t.factor}</span>
+                        {t.lc} <span style={STYLES.dimText}>×{t.factor}</span>
                       </span>
                     ))}
                     {(!c.terms||c.terms.length===0)&&(
@@ -3818,7 +3920,7 @@ function StepCombos({cfg,set}) {
                       <div style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',
                         padding:'0 4px',fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',
                         textTransform:'uppercase',letterSpacing:'0.06em'}}>
-                        <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
+                        <span>Load Case</span><span style={STYLES.center}>Factor</span><span/>
                       </div>
                     )}
                     {(c.terms||[]).map((term)=>{
@@ -3976,7 +4078,7 @@ function StepCombos({cfg,set}) {
                   {c.terms?.length>0&&(
                     <div style={{display:'grid',gridTemplateColumns:'1fr 80px 28px',gap:'6px',
                       padding:'0 4px',fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em'}}>
-                      <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
+                      <span>Load Case</span><span style={STYLES.center}>Factor</span><span/>
                     </div>
                   )}
                   {(c.terms||[]).map((term)=>{
@@ -4316,7 +4418,7 @@ function BeamChart({ rows, load, field, label, unit, color, scaleVal=1, nodePosi
     });
     return () => { if(chartRef.current) chartRef.current.destroy(); };
   }, [rows, load, field, scaleVal, nodePositions]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <canvas ref={canvasRef} style={STYLES.fullSize}/>;
 }
 
 // ── W-Shape Properties (AISC 16th Ed) [d(in), tw(in), Zx(in³), Sx(in³)] ────
@@ -4414,7 +4516,7 @@ function EnvelopeChart({ envData, unit, nodePositions={} }) {
       modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
     return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[envData]);
-  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={STYLES.fullSize}/>;
 }
 
 function DirectChart({ pts, label, unit, color, nodePositions={} }) {
@@ -4437,7 +4539,7 @@ function DirectChart({ pts, label, unit, color, nodePositions={} }) {
       modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
     return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[pts]);
-  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={STYLES.fullSize}/>;
 }
 function MultiOverlayChart({ rows, loadCases, field, label, unit, colors, nodePositions={} }) {
   const divRef=useRef(null);
@@ -4467,7 +4569,7 @@ function MultiOverlayChart({ rows, loadCases, field, label, unit, colors, nodePo
       modeBarButtonsToRemove:['select2d','lasso2d','autoScale2d']});
     return()=>{if(divRef.current) Plotly.purge(divRef.current);};
   },[rows,loadCases,field]);
-  return <div ref={divRef} style={{width:'100%',height:'100%'}}/>;
+  return <div ref={divRef} style={STYLES.fullSize}/>;
 }
 
 // ── Module-level PNG download (uses Chart.js registry) ───────────────────────
@@ -4614,7 +4716,7 @@ function RatingChart({ ratingData, operatingData=[], nodePositions={}, yMax=null
     });
     return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
   },[ratingData, operatingData, yMax]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <canvas ref={canvasRef} style={STYLES.fullSize}/>;
 }
 
 // ── Demand vs. Capacity Overlay Chart ────────────────────────────────────────
@@ -4684,7 +4786,7 @@ function DemandCapacityChart({ ratingData, nodePositions={}, mode='moment',
     });
     return ()=>{ if(chartRef.current) chartRef.current.destroy(); };
   },[ratingData, mode, showInv, showOp, gamDC, gamDW, gamLL, gamLL_op, ratingLLScale]);
-  return <canvas ref={canvasRef} style={{width:'100%',height:'100%'}}/>;
+  return <canvas ref={canvasRef} style={STYLES.fullSize}/>;
 }
 
 function computeComboRows(origRows, combo) {
@@ -5290,6 +5392,116 @@ function aremaAllowables(z, sec) {
   const Fs_X     = 0.75 * K;                              // shear = 0.75K
 
   return {Fy,E,L,ryc,LRyc, Ft_N,Fb_N,Fs_N,Fb_N_ltb, K,Ft_X,Fb_X,Fs_X,Fb_X_ltb};
+}
+
+// Plotly version of girder section (returns {shapes, annotations})
+function aremaGirderPlotly(z, sec) {
+  if (!sec || sec.totalDepth<=0) return null;
+  const shapes = [], annotations = [];
+  const comps = z.aremaComps || defaultAremaComps();
+  const G = id => comps.find(c=>c.id===id) || {on:false};
+  const tcp=G('tcp'), tan_=G('tan'), twl=G('twl'), twr=G('twr'),
+        web=G('web'), bwl=G('bwl'), bwr=G('bwr'), ban=G('ban'), bcp=G('bcp');
+  const {h_bcp,h_tcp,outToOut,gap,hw,tw,ybG,web_bot_y,totalDepth}=sec;
+  
+  const lossSL = hasSectionLoss(z);
+  const effD = (nom, loss) => lossSL ? Math.max(0, nom-(+(loss)||0)) : nom;
+  const holeDiam = +(z.holeDiam||0), webHoleDiam = +(z.webHoleDiam||0);
+  const holesN = +(z.holesInChain||0), webHolesN = +(z.webHolesInChain||0);
+  
+  function addRect(xL,yB,wi,hi,fill,name) {
+    shapes.push({type:'rect',x0:xL,y0:yB,x1:xL+wi,y1:yB+hi,fill:{color:fill},line:{color:'#1e293b',width:0.6},opacity:0.9,hovertext:name,hoverinfo:'text'});
+  }
+  function addDash(xL,yB,wi,hi) {
+    shapes.push({type:'rect',x0:xL,y0:yB,x1:xL+wi,y1:yB+hi,fill:{color:'rgba(0,0,0,0)'},line:{color:'#ef4444',width:0.9,dash:'dash'},opacity:0.7});
+  }
+  function addRivet(x,y,w,h) {
+    shapes.push({type:'rect',x0:x-w/2,y0:y,x1:x+w/2,y1:y+h,fill:{color:'#fff'},line:{color:'#9ca3af',width:0.3},opacity:0.8});
+  }
+  
+  if (bcp.on && bcp.t>0) {
+    const wN=+(bcp.w||18), wE=effD(wN,bcp.lossW), hE=effD(h_bcp,bcp.lossHt);
+    if (lossSL && (wE<wN || hE<h_bcp)) addDash(-wN/2,0,wN,h_bcp);
+    addRect(-wE/2,h_bcp-hE,wE,hE,'#3b82f6','Bot Cover Plate');
+  }
+  
+  if (ban.on && ban.w>0 && ban.h>0 && ban.t>0) {
+    const btN=+ban.t, ban_bwN=+ban.w, ban_bhN=+ban.h;
+    const ban_bwE=effD(ban_bwN,ban.lossW), ban_bhE=effD(ban_bhN,ban.lossHt);
+    const ban_thE=effD(btN,ban.lossTH), ban_tvE=effD(btN,ban.lossTV);
+    const ban_htw=tw/2, ban_wspOff=(bwl.on&&bwl.w>0)?+bwl.w:0;
+    addRect(-ban_htw-ban_wspOff-ban_tvE,h_bcp,-ban_tvE,ban_bhE,'#22c55e','Ban L V-leg');
+    addRect(-ban_htw-ban_wspOff-ban_bwE,h_bcp,-(ban_bwE-ban_tvE),ban_thE,'#22c55e','Ban L H-leg');
+    addRect(ban_htw+ban_wspOff,h_bcp,ban_tvE,ban_bhE,'#22c55e','Ban R V-leg');
+    addRect(ban_htw+ban_wspOff+ban_tvE,h_bcp,ban_bwE-ban_tvE,ban_thE,'#22c55e','Ban R H-leg');
+  }
+  
+  if (bwl.on&&bwl.w>0&&bwl.h>0) {
+    const twN=+bwl.w, thN=+bwl.h, twE=effD(twN,bwl.lossW), thE=effD(thN,bwl.lossHt);
+    if (lossSL&&(twE<twN||thE<thN)) addDash(-tw/2-twN,h_bcp+gap,-twN,thN);
+    addRect(-tw/2-twE,h_bcp+gap,-twE,thE,'#a855f7','Bot WSP L');
+  }
+  if (bwr.on&&bwr.w>0&&bwr.h>0) {
+    const twN=+bwr.w, thN=+bwr.h, twE=effD(twN,bwr.lossW), thE=effD(thN,bwr.lossHt);
+    if (lossSL&&(twE<twN||thE<thN)) addDash(tw/2,h_bcp+gap,twN,thN);
+    addRect(tw/2,h_bcp+gap,twE,thE,'#a855f7','Bot WSP R');
+  }
+  
+  if (web.on&&tw>0&&hw>0) {
+    const twE=effD(tw,web.lossW);
+    if (lossSL&&twE<tw) addDash(-tw/2,h_bcp+gap,tw,hw);
+    addRect(-twE/2,h_bcp+gap,twE,hw,'#ef4444','Web Plate');
+  }
+  
+  if (twl.on&&twl.w>0&&twl.h>0) {
+    const twN=+twl.w, thN=+twl.h, twE=effD(twN,twl.lossW), thE=effD(thN,twl.lossHt);
+    if (lossSL&&(twE<twN||thE<thN)) addDash(-tw/2-twN,h_bcp+gap+hw-thN,-twN,thN);
+    addRect(-tw/2-twE,h_bcp+gap+hw-thE,-twE,thE,'#a855f7','Top WSP L');
+  }
+  if (twr.on&&twr.w>0&&twr.h>0) {
+    const twN=+twr.w, thN=+twr.h, twE=effD(twN,twr.lossW), thE=effD(thN,twr.lossHt);
+    if (lossSL&&(twE<twN||thE<thN)) addDash(tw/2,h_bcp+gap+hw-thN,twN,thN);
+    addRect(tw/2,h_bcp+gap+hw-thE,twE,thE,'#a855f7','Top WSP R');
+  }
+  
+  if (tan_.on&&tan_.w>0&&tan_.h>0&&tan_.t>0) {
+    const ttN=+tan_.t, tan_bwN=+tan_.w, tan_bhN=+tan_.h;
+    const tan_bwE=effD(tan_bwN,tan_.lossW), tan_bhE=effD(tan_bhN,tan_.lossHt);
+    const tan_thE=effD(ttN,tan_.lossTH), tan_tvE=effD(ttN,tan_.lossTV);
+    const htw=tw/2, wsp_off=(twl.on&&twl.w>0)?+twl.w:0;
+    addRect(-htw-wsp_off-tan_tvE,totalDepth-h_tcp-tan_bhE,-tan_tvE,tan_bhE,'#22c55e','Tan L V-leg');
+    addRect(-htw-wsp_off-tan_bwE,totalDepth-h_tcp-tan_thE,-(tan_bwE-tan_tvE),tan_thE,'#22c55e','Tan L H-leg');
+    addRect(htw+wsp_off,totalDepth-h_tcp-tan_bhE,tan_tvE,tan_bhE,'#22c55e','Tan R V-leg');
+    addRect(htw+wsp_off+tan_tvE,totalDepth-h_tcp-tan_thE,tan_bwE-tan_tvE,tan_thE,'#22c55e','Tan R H-leg');
+  }
+  
+  if (tcp.on&&tcp.t>0) {
+    const wN=+(tcp.w||18), wE=effD(wN,tcp.lossW), hE=effD(h_tcp,tcp.lossHt);
+    if (lossSL&&(wE<wN||hE<h_tcp)) addDash(-wN/2,totalDepth-h_tcp,wN,h_tcp);
+    addRect(-wE/2,totalDepth-h_tcp,wE,hE,'#3b82f6','Top Cover Plate');
+  }
+  
+  const rivetW=0.4, rivetH=0.3, rivetSpacing=2.5;
+  if (ban.on && ban.w>0 && ban.h>0) {
+    const ban_htw=tw/2, ban_wspOff=(bwl.on&&bwl.w>0)?+bwl.w:0;
+    for (let y=h_bcp+0.5; y<h_bcp+ban.h-0.5; y+=rivetSpacing) {
+      addRivet(-ban_htw-ban_wspOff-rivetW/2,y,rivetW,rivetH);
+      addRivet(ban_htw+ban_wspOff+rivetW/2,y,rivetW,rivetH);
+    }
+  }
+  if (tan_.on && tan_.w>0 && tan_.h>0) {
+    const htw=tw/2, wsp_off=(twl.on&&twl.w>0)?+twl.w:0;
+    for (let y=totalDepth-h_tcp-tan_.h+0.5; y<totalDepth-h_tcp-0.5; y+=rivetSpacing) {
+      addRivet(-htw-wsp_off-rivetW/2,y,rivetW,rivetH);
+      addRivet(htw+wsp_off+rivetW/2,y,rivetW,rivetH);
+    }
+  }
+  
+  shapes.push({type:'line',x0:-tw/2-5,x1:tw/2+5,y0:ybG,y1:ybG,line:{color:'#f59e0b',width:2,dash:'dash'},hovertext:`NA @ ${ybG.toFixed(2)}"`,hoverinfo:'text'});
+  annotations.push({x:tw/2+4,y:ybG,text:'NA',font:{size:9,family:'monospace',color:'#f59e0b'},showarrow:false,xanchor:'left'});
+  annotations.push({x:-tw/2-8,y:totalDepth/2,text:`${totalDepth.toFixed(2)}"`,font:{size:8,family:'monospace',color:'#6b7280'},showarrow:false,textangle:-90});
+  
+  return {shapes,annotations};
 }
 
 // SVG cross-section diagram (returns SVG string)
@@ -6026,7 +6238,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const Vdc = dc?.shearZ||0, Vdw = dw?.shearZ||0;
       const Mllpos = Math.max(0, llp?.momentY||0);
       const Mllneg = Math.abs(Math.min(0, -(lln?.momentY||0)));
-      const Vll    = Math.max(llp?.shearZ||0, lln?.shearZ||0);
+      const Vll    = Math.max(Math.abs(llp?.shearZ||0), Math.abs(lln?.shearZ||0));
 
       // Get zone capacity at this node position
       const cap = capAt(xPos);
@@ -6367,7 +6579,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   // Helper: extract AREMA params from cfg.rating (single source of truth)
   const _aremaParams = (()=>{
     const R2 = cfg?.rating||{};
-    const span    = +(R2.arema_span    ?? (totalBridgeLen||50));
+    const span    = Math.max(20, +(cfg?.spans?.[0] ?? 50));  // Use first span from Geometry tab
     const impAuto = R2.arema_imp_auto !== false;
     const impMan  = +(R2.arema_imp_man ?? 0.25);
     const DF      = +(R2.arema_DF      ?? 0.5);
@@ -6376,6 +6588,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const eNum    = +(R2.arema_eNum    ?? 80);
     const dcLC    = R2.arema_dcLC  || ratingDcLC  || '';
     const llLC    = R2.arema_llLC  || ratingLLposLC || '';
+    const llLC_shear = llLC ? (llLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)') || llLC) : '';  // Auto-derive All case from LL
+    const llNegLC = R2.arema_llNegLC || '';  // Optional negative LL load case for shear (use both pos+neg, take max)
     const dlFactor = +(R2.arema_dlFactor ?? 1.0);   // DL factor — multiplies all dead load results (default 1.0)
     const iAuto   = span<80 ? Math.max(0,(40-3*span*span/1600)/100)  // AREMA §1.3.1: quadratic for L≤80
                           : span<=175 ? (16+600/Math.max(span-30,1))/100   // L 80–175 ft
@@ -6387,7 +6601,24 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
     // ── Bridge cross-section geometry ──────────────────────────────────────
     const n_gird  = Math.max(2, Math.round(+(R2.arema_n      ?? 2)));   // number of girders
-    const S_gird  = Math.max(0.1, +(R2.arema_S      ?? 6.0));          // girder c-c spacing (ft)
+    
+    // Parse variable spacing: "6, 6, 5.5" or single "6" for uniform
+    const parseSpacings = (input, numGirders) => {
+      if (!input || typeof input !== 'string') return null;
+      const vals = input.split(',').map(s => parseFloat(s.trim())).filter(v => v > 0);
+      if (vals.length === 1) {
+        // Single value: uniform spacing
+        return Array(numGirders - 1).fill(vals[0]);
+      }
+      if (vals.length === numGirders - 1) {
+        // Variable spacing: one value per gap
+        return vals;
+      }
+      return null; // Invalid input
+    };
+    const spacings = parseSpacings(R2.arema_spacings, n_gird) ?? Array(n_gird-1).fill(+(R2.arema_S ?? 6.0));
+    const S_gird  = Math.max(0.1, spacings[0] ?? 6.0);  // first spacing (for reference)
+    
     const h_rail  = Math.max(0,   +(R2.arema_h_rail ?? 1.5));          // top of rail above top flange (ft)
 
     // Rocking impact addition (AREMA §1.3.6): applied as impact, not lateral moment
@@ -6395,8 +6626,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const I_rock  = (S_gird>0) ? 0.20 * (gauge/12) / S_gird : 0;
     const f1pI    = 1 + ballastF * (iBase + I_rock); // total (1+I): ballast factor applies to both impact and rocking
 
-    // Girder group: equally spaced, compute Ix_group and max eccentricity
-    const gPos    = Array.from({length:n_gird}, (_,i) => i * S_gird);
+    // Girder group: calculate actual positions from spacings array
+    // spacings = [space1, space2, space3, ...] (one less than number of girders)
+    const gPos = (() => {
+      const pos = [0];
+      for (let i = 0; i < spacings.length; i++) {
+        pos.push(pos[pos.length-1] + spacings[i]);
+      }
+      return pos;
+    })();
     const gCent   = gPos.reduce((s,p)=>s+p, 0) / n_gird;
     const gd      = gPos.map(p => p - gCent);           // eccentricities (ft)
     const Ix_grp  = gd.reduce((s,d)=>s+d*d, 0);        // Σd² (ft²)
@@ -6498,7 +6736,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const fatBeta  = +(R2.arema_fatBeta  ?? 0.15);  // fatigue impact factor (AREMA Table 15-7-1)
     const I_fat    = 1 + fatBeta * ballastF * (iBase + I_rock); // fatigue (1+I): β and ballast factor both apply
 
-    return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,longLC,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
+    return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,llLC_shear,llNegLC,longLC,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
             n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,H_CF,
             q_wind,R_rock,R_CF,CF_CW,F_CF,gauge_ft,
             V_wind_lat,V_rock_lat,V_CF_lat,
@@ -6510,7 +6748,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   })();
 
   const aremaAsdData = useMemo(()=>{
-    const {dcLC,llLC,longLC,long_mult,f1pI,DF,M_CF,M_mod,
+    const {dcLC,llLC,llNegLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,
            V_wind_lat,V_rock_lat,V_CF_lat,SFT,fatAlpha,I_fat,dlFactor} = _aremaParams;
     if (!llLC || !origRows.length || !hasAremaAnywhere) return [];
 
@@ -6534,15 +6772,18 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       if (!cap._arema) return null;
       const sec=cap._arema, allo=cap._allow;
 
-      const dc   = nvA(dcLC,  node);
-      const llp  = nvA(llLC,  node);
-      const longp= nvA(longLC, node);
+      const dc    = nvA(dcLC,  node);
+      const llp   = nvA(llLC,  node);
+      const lln   = llNegLC ? nvA(llNegLC, node) : llp;
+      const llp_v = llLC_shear ? nvA(llLC_shear, node) : nvA(llLC, node);  // Use shear LC if specified, otherwise use regular LL
+      const lln_v = llLC_shear && llNegLC ? nvA(llNegLC, node) : llp_v;  // For shear, use both directions if shear LC is set
+      const longp = nvA(longLC, node);
       if (!llp) return null;
 
       const MDL = Math.abs(dc?.momentY||0) * dlFactor;   // DL factor accounts for unknown elements
       const VDL = (dc?.shearZ||0) * dlFactor;
       const MLL = Math.max(0, llp?.momentY||0);
-      const VLL = llp?.shearZ||0;
+      const VLL = Math.max(Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
 
       // Longitudinal from selected MIDAS LC — scaled by span multiplier
       const M_long_node = longp ? Math.abs(longp.momentY||0) * long_mult : 0;
@@ -6601,7 +6842,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
               rfcM,rftM,rfvM,gM,govM,
               rfFat, dM_fat, SR_no_alpha, fatAlphaFlag, sec, allo};
     }).filter(Boolean);
-  },[origRows,capZones,nodePositions,cfg,ratingDcLC,ratingLLposLC]);
+  },[origRows,capZones,nodePositions,cfg,_aremaParams,ratingDcLC,ratingLLposLC]);
 
   const govAsdN   = aremaAsdData.length ? aremaAsdData.reduce((a,b)=>a.gN<b.gN?a:b,aremaAsdData[0]) : null;
   const govAsdX   = aremaAsdData.length ? aremaAsdData.reduce((a,b)=>a.gX<b.gX?a:b,aremaAsdData[0]) : null;
@@ -6612,7 +6853,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   })();
 
   const aremaMultiData = useMemo(()=>{
-    const {dcLC,llLC,longLC,long_mult,f1pI,DF,M_CF,M_mod,
+    const {dcLC,llLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,
            V_wind_lat,V_rock_lat,V_CF_lat,SFT,fatAlpha,fatBeta,I_fat,dlFactor} = _aremaParams;
     if (!origRows.length || !hasAremaAnywhere) return [];
 
@@ -6645,12 +6886,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const dc  = dcLC ? nodeValsA(origRows,dcLC,node) : null;
         const llp = nodeValsA(origRows,veh.posLC,node);
         const lln = veh.negLC ? nodeValsA(origRows,veh.negLC,node) : llp;
+        // For shear: use THIS VEHICLE'S load case converted to "all" variant, not global selection
+        const llp_v = nodeValsA(origRows, veh.posLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node);
+        const lln_v = veh.negLC ? nodeValsA(origRows, veh.negLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node) : llp_v;
         if (!llp) return null;
 
         const MDL = Math.abs(dc?.momentY||0) * dlFactor;   // DL factor
         const VDL = (dc?.shearZ||0) * dlFactor;
         const MLL = Math.max(0, llp?.momentY||0);
-        const VLL = Math.max(llp?.shearZ||0, lln?.shearZ||0);
+        const VLL = Math.max(Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
 
         const dM = MLL>0.001 ? MLL*f1pI*DF : null;
         const dV = VLL>0.001 ? VLL*f1pI*DF : null;
@@ -6680,7 +6924,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const gN=rN.length?Math.min(...rN):null, gX=rX.length?Math.min(...rX):null, gM=rM.length?Math.min(...rM):null;
         // Store all individual RFs for summary table interpolation
         return {node, pos:xPos, gN, gX, gM, rfFat:rF,
-          rfcN, rftN, rfvN, rfcX, rftX, rfvX, rfcM, rftM, rfvM};
+          rfcN, rftN, rfvN, rfcX, rftX, rfvX, rfcM, rftM, rfvM, dV_N, dV_mod};
       }).filter(Boolean);
 
       if (!nodeRes.length) return null;
@@ -6689,17 +6933,26 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const govM   = nodeRes.reduce((a,b)=>(a.gM??Infinity)<(b.gM??Infinity)?a:b, nodeRes[0]);
       const fatRows = nodeRes.filter(r=>r.rfFat!=null&&isFinite(r.rfFat));
       const govF   = fatRows.length ? fatRows.reduce((a,b)=>a.rfFat<b.rfFat?a:b, fatRows[0]) : null;
+      // Governing shear is the minimum of rfvN and rfvM
+      const shearRows = nodeRes.filter(r=>(r.rfvN!=null&&isFinite(r.rfvN)) || (r.rfvM!=null&&isFinite(r.rfvM)));
+      const govV   = shearRows.length ? shearRows.reduce((a,b)=>{
+        const aMin = Math.min(a.rfvN??Infinity, a.rfvM??Infinity);
+        const bMin = Math.min(b.rfvN??Infinity, b.rfvM??Infinity);
+        return aMin < bMin ? a : b;
+      }, shearRows[0]) : null;
 
       return {
         name:veh.name, label:veh.label, tons:veh.tons, posLC:veh.posLC, gvwKips:veh.gvwKips,
         rfN: govN.gN!=null&&isFinite(govN.gN) ? +govN.gN.toFixed(3) : null, nodeN:govN.node, posN:govN.pos,
         rfX: govX.gX!=null&&isFinite(govX.gX) ? +govX.gX.toFixed(3) : null, nodeX:govX.node, posX:govX.pos,
         rfM: govM.gM!=null&&isFinite(govM.gM) ? +govM.gM.toFixed(3) : null, nodeM:govM.node, posM:govM.pos,
+        rfvN: govV?.rfvN!=null&&isFinite(govV.rfvN) ? +govV.rfvN.toFixed(3) : null,
+        rfvM: govV?.rfvM!=null&&isFinite(govV.rfvM) ? +govV.rfvM.toFixed(3) : null,
         rfFat:govF?.rfFat!=null&&isFinite(govF.rfFat)?+govF.rfFat.toFixed(3):null, nodeFat:govF?.node,
         allNodeRes: nodeRes,   // full per-node data for summary table interpolation
       };
     }).filter(Boolean);
-  },[origRows,capZones,nodePositions,vehicleLCMap,cfg?.selectedVehicles,cfg,ratingDcLC]);
+  },[origRows,capZones,nodePositions,vehicleLCMap,cfg?.selectedVehicles,cfg,_aremaParams,ratingDcLC]);
 
   // ── Multi-vehicle rating table ────────────────────────────────────────────
   // ── Multi-vehicle rating — uses ACTUAL result rows per vehicle ────────────
@@ -6991,7 +7244,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
             <div style={{fontSize:'14px',fontWeight:'700',color:'#7c3aed',fontFamily:'monospace'}}>
               AASHTO Load Rating (LRFR / LFR)
             </div>
-            <div style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+            <div style={STYLES.monoMed}>
               MBE Section 6A · Strength I / Service II / Fatigue · Inventory &amp; Operating
             </div>
           </div>
@@ -7008,7 +7261,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
             <div style={{fontSize:'14px',fontWeight:'700',color:'#92400e',fontFamily:'monospace'}}>
               AREMA Load Rating — Allowable Stress Design
             </div>
-            <div style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+            <div style={STYLES.monoMed}>
               AREMA Manual Ch.15 §7.3 · Normal (Table 15-1-11) · Maximum &amp; Modified (Table 15-7-1)
             </div>
           </div>
@@ -7187,7 +7440,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   <input type="checkbox" checked={envelopeCh.includes(ch.key)} onChange={()=>toggleEnvCh(ch.key)}
                     style={{accentColor:ch.color,width:'14px',height:'14px'}}/>
                   <span style={{fontSize:'12px',color:envelopeCh.includes(ch.key)?ch.color:'#6b7280',fontWeight:envelopeCh.includes(ch.key)?'600':'400'}}>{ch.label}</span>
-                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>{ch.unit}</span>
+                  <span style={STYLES.monoMed}>{ch.unit}</span>
                 </label>
               ))}
             </div>
@@ -7500,13 +7753,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 if (info.type==='static') return (
                   <div style={{display:'flex',alignItems:'center',gap:'5px',marginTop:'3px',fontSize:'10px',fontFamily:'monospace'}}>
                     <span style={{color:'#059669',fontWeight:'600'}}>✓ Unfactored</span>
-                    <span style={{color:'#9ca3af'}}>— raw static result · apply {gamLabel} = {gam}</span>
+                    <span style={STYLES.dimText}>— raw static result · apply {gamLabel} = {gam}</span>
                   </div>
                 );
                 if (info.type==='moving') return (
                   <div style={{display:'flex',alignItems:'center',gap:'5px',marginTop:'3px',fontSize:'10px',fontFamily:'monospace'}}>
                     <span style={{color:'#059669',fontWeight:'600'}}>✓ Unfactored</span>
-                    <span style={{color:'#9ca3af'}}>— raw moving load envelope · apply {gamLabel} = {gam}</span>
+                    <span style={STYLES.dimText}>— raw moving load envelope · apply {gamLabel} = {gam}</span>
                   </div>
                 );
                 if (info.type==='combo') return (
@@ -7785,7 +8038,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </div>
                         {[['Sx⁺ (in³) — bottom flange positive moment','SxPos'],['Sx⁻ (in³) — top flange negative moment','SxNeg']].map(([lbl,field])=>(
                           <div key={field}>
-                            <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                            <div style={STYLES.monoSmall}>{lbl}</div>
                             <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}
                               value={z[field]||''} onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
                           </div>
@@ -7814,7 +8067,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ["d (in)",'d',21],["tw (in)",'tw',0.4],["Aw (in²)",'Aw',0]
                         ].map(([lbl,field,def])=>(
                           <div key={field}>
-                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <div style={STYLES.monoTiny2}>{lbl}</div>
                             <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                               value={z[field]||''} placeholder={String(def)}
                               onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -7834,7 +8087,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ["ts (in)",'ts',8,0.25],["Haunch th (in)",'th',0,0.25]
                         ].map(([lbl,field,def,step])=>(
                           <div key={field}>
-                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <div style={STYLES.monoTiny2}>{lbl}</div>
                             <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                               value={z[field]||''} placeholder={String(def)}
                               onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -7856,14 +8109,14 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ["dsr (in from top)",'dsr',0,0.5]
                         ].map(([lbl,field,def,step])=>(
                           <div key={field}>
-                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <div style={STYLES.monoTiny2}>{lbl}</div>
                             <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                               value={z[field]||''} placeholder={String(def)}
                               onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
                           </div>
                         ))}
                         <div>
-                          <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>Use composite Mn⁻</div>
+                          <div style={STYLES.monoTiny2}>Use composite Mn⁻</div>
                           <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer'}}>
                             <input type="checkbox" checked={!!z.useCompNeg}
                               onChange={e=>updateCapZone(z.id,'useCompNeg',e.target.checked)}
@@ -7882,7 +8135,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       </div>
                       {[['Sx⁺ (in³) bottom flange','SxPos'],['Sx⁻ (in³) top flange','SxNeg']].map(([lbl,field])=>(
                         <div key={field}>
-                          <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                          <div style={STYLES.monoSmall}>{lbl}</div>
                           <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}
                             value={z[field]||''} onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
                         </div>
@@ -7903,7 +8156,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           PNA: {pnaInDeck?'in deck (full composite)':'in steel (partial composite)'} &nbsp;·&nbsp;
                           Mn⁺ = {MnPos.toFixed(1)} ft·k &nbsp;·&nbsp; Mn⁻ = {MnNeg.toFixed(1)} ft·k &nbsp;·&nbsp; Vn = {Vn.toFixed(1)} kips
                           <br/>
-                          <span style={{color:'#9ca3af'}}>φMn⁺ = {(phiC*phiS*ratingPhiF*MnPos).toFixed(1)} &nbsp; φVn = {(phiC*phiS*ratingPhiV*Vn).toFixed(1)}</span>
+                          <span style={STYLES.dimText}>φMn⁺ = {(phiC*phiS*ratingPhiF*MnPos).toFixed(1)} &nbsp; φVn = {(phiC*phiS*ratingPhiV*Vn).toFixed(1)}</span>
                         </div>
                       );
                     })()}
@@ -7923,7 +8176,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         ["bw (in) web",'bw',7,0.5],["dv (in) eff. shear",'dv',0,0.5]
                       ].map(([lbl,field,def,step])=>(
                         <div key={field}>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                          <div style={STYLES.monoTiny}>{lbl}</div>
                           <input type="number" step={step||0.1} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                             value={field==='beta1'?(z.beta1||psBeta1(z.fc||5).toFixed(2)):z[field]||def}
                             placeholder={field==='beta1'?psBeta1(z.fc||5).toFixed(2):String(def)}
@@ -7943,7 +8196,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ["fpe (ksi)",'fpe',0,1]
                         ].map(([lbl,field,def,step])=>(
                           <div key={field}>
-                            <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <div style={STYLES.monoTiny}>{lbl}</div>
                             <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                               value={z[field]||''}  placeholder={String(def)}
                               onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -7961,7 +8214,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         ["ds (in)",'ds',0,0.5],["As' (in²) comp.",'Asp',0,0.01]
                       ].map(([lbl,field,def,step])=>(
                         <div key={field}>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                          <div style={STYLES.monoTiny}>{lbl}</div>
                           <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                             value={z[field]||''} placeholder={String(def)}
                             onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -7981,7 +8234,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             ["ψ (°) Vp",'psi',0,1],["fpe· Aps",'fpe','↑','—']
                           ].filter(([,f])=>f!=='fpe').map(([lbl,field,def,step])=>(
                             <div key={field}>
-                              <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                              <div style={STYLES.monoTiny2}>{lbl}</div>
                               <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                                 value={z[field]||''} placeholder={String(def)}
                                 onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -7999,7 +8252,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ].map(([lbl,field,def])=>(
                             field==='exposure' ? (
                               <div key={field}>
-                                <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                                <div style={STYLES.monoTiny2}>{lbl}</div>
                                 <select value={ps3Exposure} onChange={e=>setRating('ps3Exposure',e.target.value)}
                                   style={{...INP2,fontSize:'11px'}}>
                                   <option value="moderate">Moderate</option>
@@ -8008,7 +8261,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               </div>
                             ) : (
                               <div key={field}>
-                                <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                                <div style={STYLES.monoTiny2}>{lbl}</div>
                                 <input type="number" step="0.1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                                   value={z[field]||''} placeholder={String(def)}
                                   onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -8064,7 +8317,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         padding:'8px 10px',background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:'4px'}}>
                         {/* Out-to-out */}
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>
+                          <div style={STYLES.monoTiny}>
                             Out-to-out angle dist (in)
                           </div>
                           <input type="number" step="0.0625" style={{...INP2,fontFamily:'monospace',fontWeight:'700',fontSize:'13px',color:'#1d4ed8'}}
@@ -8076,7 +8329,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </div>
                         {/* Fy */}
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>Fy (ksi)</div>
+                          <div style={STYLES.monoTiny}>Fy (ksi)</div>
                           <input type="number" step="1" style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}
                             value={z.Fy||36}
                             onChange={e=>updateCapZone(z.id,'Fy',parseFloat(e.target.value)||36)}/>
@@ -8086,7 +8339,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </div>
                         {/* Unbraced length + ryc */}
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>
+                          <div style={STYLES.monoTiny}>
                             Unbraced L (in) · r<sub>yc</sub>
                           </div>
                           <div style={{display:'flex',gap:'4px'}}>
@@ -8118,7 +8371,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           ['Gage g (in)','holeGage',1.5,'0.25'],['# Holes in chain','holesInChain',0,'1']
                         ].map(([lbl,field,def,step])=>(
                           <div key={field}>
-                            <div style={{fontSize:'8px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>{lbl}</div>
+                            <div style={STYLES.monoTiny2}>{lbl}</div>
                             <input type="number" step={step} style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'11px'}}
                               value={z[field]??def}
                               onChange={e=>updateCapZone(z.id,field,parseFloat(e.target.value)||0)}/>
@@ -8135,7 +8388,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:'10px',alignItems:'start'}}>
 
                         {/* Component table */}
-                        <div style={{overflowX:'auto'}}>
+                        <div style={STYLES.fullScroll}>
                           <table style={{borderCollapse:'collapse',fontSize:'11px',width:'100%',tableLayout:'fixed'}}>
                             <colgroup>
                               <col style={{width:'22px'}}/>
@@ -8147,7 +8400,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               <col style={{width:'40px'}}/>
                             </colgroup>
                             <thead>
-                              <tr style={{background:'#f3f4f6'}}>
+                              <tr style={STYLES.bgGray}>
                                 <th style={{padding:'3px',border:'1px solid #e5e7eb'}}></th>
                                 <th style={{padding:'3px',border:'1px solid #e5e7eb',fontSize:'9px',fontFamily:'monospace',color:'#374151'}}>On</th>
                                 <th style={{padding:'3px 5px',border:'1px solid #e5e7eb',textAlign:'left',fontSize:'9px',fontFamily:'monospace',color:'#374151'}}>Component</th>
@@ -8246,15 +8499,6 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',textAlign:'center',marginTop:'3px'}}>
                             Cross-section to scale · — NA
                           </div>
-                          {/* Legend */}
-                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'2px 6px',marginTop:'5px'}}>
-                            {[['#3b82f6','Cover Plates'],['#22c55e','Angles'],['#ef4444','Web'],['#a855f7','Web Side Pl.']].map(([cl,lb])=>(
-                              <div key={lb} style={{display:'flex',alignItems:'center',gap:'3px'}}>
-                                <div style={{width:'8px',height:'8px',background:cl,borderRadius:'1px',flexShrink:0}}/>
-                                <span style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280'}}>{lb}</span>
-                              </div>
-                            ))}
-                          </div>
                         </div>
                       </div>
 
@@ -8325,7 +8569,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{display:'flex',flexDirection:'column',gap:'5px'}}>
 
                         {/* §1 — Total Depth */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §1 Total Depth Calculation
@@ -8341,7 +8585,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </details>
 
                         {/* §2 — Centroid table */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §2 Neutral Axis (ȳ) — Gross Section
@@ -8349,7 +8593,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           <div style={{padding:'8px',background:'#fafafa',overflowX:'auto'}}>
                             <table style={{borderCollapse:'collapse',fontSize:'10px',fontFamily:'monospace',width:'100%'}}>
                               <thead>
-                                <tr style={{background:'#f3f4f6'}}>
+                                <tr style={STYLES.bgGray}>
                                   {['Component','A_gross (in²)','ȳᵢ (in)','A·ȳ (in³)','NET?'].map(h=>(
                                     <th key={h} style={{padding:'3px 6px',border:'1px solid #e5e7eb',
                                       textAlign:'right',fontWeight:'600',color:'#374151',whiteSpace:'nowrap',
@@ -8397,7 +8641,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </details>
 
                         {/* §3 — Angle decomposition */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §3 Angle L-Shape Decomposition
@@ -8406,7 +8650,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             color:'#374151',lineHeight:'1.8',background:'#fafafa'}}>
                             {(()=>{
                               const angComps = sec.items.filter(i=>i.apData);
-                              if (!angComps.length) return <span style={{color:'#9ca3af'}}>No angles in section.</span>;
+                              if (!angComps.length) return <span style={STYLES.dimText}>No angles in section.</span>;
                               return angComps.map(it=>{
                                 const ap=it.apData;
                                 const c=comps.find(x=>x.id===it.id)||{};
@@ -8454,13 +8698,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                                 <strong style={{color:'#dc2626'}}>Reduction factor = {(netBan/grossBan).toFixed(4)}</strong>
                               </>);
                             })() : (
-                              <span style={{color:'#9ca3af'}}>No bolt holes defined (holesInChain = 0). Using gross section throughout.</span>
+                              <span style={STYLES.dimText}>No bolt holes defined (holesInChain = 0). Using gross section throughout.</span>
                             )}
                           </div>
                         </details>
 
                         {/* §4 — MOI */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §4 Moment of Inertia — Parallel Axis Theorem
@@ -8468,7 +8712,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           <div style={{padding:'8px',background:'#fafafa',overflowX:'auto'}}>
                             <table style={{borderCollapse:'collapse',fontSize:'10px',fontFamily:'monospace',width:'100%'}}>
                               <thead>
-                                <tr style={{background:'#f3f4f6'}}>
+                                <tr style={STYLES.bgGray}>
                                   {['Component','I_xo (in⁴)','A (in²)','ȳᵢ (in)','d = ȳᵢ−ȳ','A·d² (in⁴)','Ix (in⁴)'].map(h=>(
                                     <th key={h} style={{padding:'3px 5px',border:'1px solid #e5e7eb',
                                       textAlign:'right',fontWeight:'600',color:'#374151',whiteSpace:'nowrap',
@@ -8482,7 +8726,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                                   const Ad2=it.grossA*d**2;
                                   return (
                                     <tr key={it.id}>
-                                      <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>
+                                      <td style={STYLES.padding3}>
                                         <span style={{display:'inline-block',width:'7px',height:'7px',background:it.color,borderRadius:'1px',marginRight:'3px',verticalAlign:'middle'}}/>
                                         {it.label}
                                       </td>
@@ -8498,13 +8742,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               </tbody>
                               <tfoot>
                                 <tr style={{background:'#dbeafe',fontWeight:'700',color:'#1d4ed8'}}>
-                                  <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>TOTAL Ix (gross)</td>
+                                  <td style={STYLES.padding3}>TOTAL Ix (gross)</td>
                                   <td style={{padding:'3px 5px',border:'1px solid #e5e7eb',textAlign:'right'}}>{sec.items.reduce((s,i)=>s+i.Ixo,0).toFixed(2)}</td>
                                   <td colSpan="4" style={{border:'1px solid #e5e7eb'}}></td>
                                   <td style={{padding:'3px 5px',border:'1px solid #e5e7eb',textAlign:'right',fontSize:'11px'}}>{sec.IxG.toFixed(2)}</td>
                                 </tr>
                                 <tr style={{background:'#fee2e2',fontWeight:'700',color:'#dc2626'}}>
-                                  <td style={{padding:'3px 5px',border:'1px solid #e5e7eb'}}>TOTAL Ix (net)</td>
+                                  <td style={STYLES.padding3}>TOTAL Ix (net)</td>
                                   <td colSpan="5" style={{border:'1px solid #e5e7eb'}}></td>
                                   <td style={{padding:'3px 5px',border:'1px solid #e5e7eb',textAlign:'right',fontSize:'11px'}}>{sec.IxN.toFixed(2)}</td>
                                 </tr>
@@ -8514,7 +8758,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </details>
 
                         {/* §5 — Section moduli & capacities */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §5 Section Moduli &amp; Member Capacities
@@ -8532,7 +8776,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             <strong style={{color:'#16a34a'}}>Normal Rating Capacities:</strong><br/>
                             M<sub>n_comp</sub> = S<sub>x_top</sub> × F<sub>b_N</sub> / 12 = {sec.SxTopG.toFixed(3)} × {allo.Fb_N.toFixed(3)} / 12 = <strong>{(sec.SxTopG*allo.Fb_N/12).toFixed(1)} ft·k</strong><br/>
                             M<sub>n_tens</sub> = S<sub>x_bot_net</sub> × F<sub>t_N</sub> / 12 = {sec.SxBotN.toFixed(3)} × {allo.Ft_N.toFixed(3)} / 12 = <strong>{(sec.SxBotN*allo.Ft_N/12).toFixed(1)} ft·k</strong><br/>
-                            <span style={{color:'#9ca3af'}}>→ governing Mn (Normal) = <strong style={{color:'#16a34a'}}>{Math.min(sec.SxTopG*allo.Fb_N/12,sec.SxBotN*allo.Ft_N/12).toFixed(1)} ft·k</strong></span><br/>
+                            <span style={STYLES.dimText}>→ governing Mn (Normal) = <strong style={{color:'#16a34a'}}>{Math.min(sec.SxTopG*allo.Fb_N/12,sec.SxBotN*allo.Ft_N/12).toFixed(1)} ft·k</strong></span><br/>
                             V<sub>n</sub> = A<sub>w</sub> × F<sub>s_N</sub> = {sec.Aw.toFixed(3)} × {allo.Fs_N.toFixed(3)} = <strong>{(sec.Aw*allo.Fs_N).toFixed(1)} kips</strong><br/>
                             <br/>
                             <strong style={{color:'#d97706'}}>Maximum Rating Capacities (K = {allo.Ft_X.toFixed(2)} ksi):</strong><br/>
@@ -8543,7 +8787,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </details>
 
                         {/* §6 — Weak axis Iyc */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §6 Compression Flange Weak Axis — I<sub>yc</sub> &amp; r<sub>yc</sub>
@@ -8571,7 +8815,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </details>
 
                         {/* §7 — Plastic section modulus */}
-                        <details style={{border:'1px solid #e5e7eb',borderRadius:'4px',overflow:'hidden'}}>
+                        <details style={STYLES.tableWrapped}>
                           <summary style={{padding:'6px 10px',background:'#f3f4f6',cursor:'pointer',
                             fontSize:'10px',fontFamily:'monospace',color:'#374151',fontWeight:'600',userSelect:'none'}}>
                             §7 Plastic Section Modulus Z<sub>x</sub>
@@ -8582,7 +8826,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             </div>
                             <table style={{borderCollapse:'collapse',fontSize:'10px',fontFamily:'monospace',width:'100%'}}>
                               <thead>
-                                <tr style={{background:'#f3f4f6'}}>
+                                <tr style={STYLES.bgGray}>
                                   {['Component','A (in²)','|yᵢ − PNA| (in)','A×|yᵢ−PNA| (in³)'].map(h=>(
                                     <th key={h} style={{padding:'3px 6px',border:'1px solid #e5e7eb',
                                       textAlign:'right',fontWeight:'600',color:'#374151',
@@ -8630,7 +8874,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       return <>
                         Normal: Mn={MnN.toFixed(1)} ft·k · Vn={VnN.toFixed(1)} kips &nbsp;|&nbsp;
                         Maximum: Mn={MnM.toFixed(1)} ft·k · Vn={VnM.toFixed(1)} kips
-                        <span style={{color:'#9ca3af'}}> &nbsp;(Sx_top={sec.SxTopG.toFixed(1)} · Sx_bot_net={sec.SxBotN.toFixed(1)} in³)</span>
+                        <span style={STYLES.dimText}> &nbsp;(Sx_top={sec.SxTopG.toFixed(1)} · Sx_bot_net={sec.SxBotN.toFixed(1)} in³)</span>
                       </>;
                     })() : z.type==='psconc' ? (()=>{
                       const MnPos = computePSMn(z);
@@ -8640,11 +8884,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       const effVn2 = phiC*phiS*ratingPhiV*Vn;
                       return <>
                         φMn = {effMnP.toFixed(1)} ft·k &nbsp;·&nbsp; φVn = {effVn2.toFixed(1)} kips
-                        <span style={{color:'#9ca3af'}}> &nbsp;(fps={fps.toFixed(1)} ksi · a={a.toFixed(2)} in)</span>
+                        <span style={STYLES.dimText}> &nbsp;(fps={fps.toFixed(1)} ksi · a={a.toFixed(2)} in)</span>
                       </>;
                     })() : <>
                       φC → M⁺={effMnPos.toFixed(1)} &nbsp; M⁻={effMnNeg.toFixed(1)} &nbsp; V={effVn.toFixed(1)} &nbsp;
-                      <span style={{color:'#9ca3af'}}>(ft·k / ft·k / kips)</span>
+                      <span style={STYLES.dimText}>(ft·k / ft·k / kips)</span>
                     </>}
                   </div>
                 </div>
@@ -8704,7 +8948,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
           <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px',marginBottom:'14px',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}>
             <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'8px',flexWrap:'wrap'}}>
               <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Rating Factor RF Along Beam</span>
-              <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>{ratingMethod} · {ratingLimitState} · {ratingLevel} · γ_LL={gamLL} · LL×{ratingLLScale.toFixed(3)}</span>
+              <span style={STYLES.monoMed}>{ratingMethod} · {ratingLimitState} · {ratingLevel} · γ_LL={gamLL} · LL×{ratingLLScale.toFixed(3)}</span>
               <div style={{marginLeft:'auto',display:'flex',gap:'8px',fontSize:'10px',fontFamily:'monospace'}}>
                 <span style={{color:'#059669'}}>● M⁺</span>
                 <span style={{color:'#7c3aed'}}>● M⁻</span>
@@ -8869,11 +9113,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='critical_locations.csv';a.click();
               }} style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'3px 8px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
             </div>
-            <div style={{overflowX:'auto'}}>
+            <div style={STYLES.fullScroll}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                 <thead>
                   {/* Group header row */}
-                  <tr style={{background:'#f9fafb'}}>
+                  <tr style={STYLES.bgLight}>
                     <th colSpan="2" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}/>
                     <th colSpan="4" style={{padding:'5px 8px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',background:'#f0f9ff',borderBottom:'1px solid #bfdbfe',borderRight:'1px solid #e5e7eb'}}>
                       Dead Load Moment (ft·k)
@@ -8890,7 +9134,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <th colSpan="3" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb'}}/>
                   </tr>
                   {/* Column header row */}
-                  <tr style={{background:'#f9fafb'}}>
+                  <tr style={STYLES.bgLight}>
                     {[
                       {h:'Node',    bg:'#fff',  br:false},
                       {h:'Pos (ft)',bg:'#fff',  br:true},
@@ -8983,7 +9227,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>
                     Load Rating Summary — All Limit States
                   </span>
-                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                  <span style={STYLES.monoMed}>
                     {ratingMethod} · {ratingLimitState} · {cfg?.projectName||''}
                   </span>
                   <button onClick={()=>{
@@ -9015,10 +9259,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     borderRadius:'4px',padding:'3px 9px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>
                   ↓ CSV</button>
                 </div>
-                <div style={{overflowX:'auto'}}>
+                <div style={STYLES.fullScroll}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',fontFamily:'monospace'}}>
                     <thead>
-                      <tr style={{background:'#f9fafb'}}>
+                      <tr style={STYLES.bgLight}>
                         {['Limit State','Level','γ_LL','RF (Gov)','Rating Tons',
                           'Controls','Node','Pos (ft)','Status'].map(h=>(
                           <th key={h} style={{padding:'8px 12px',textAlign:'left',fontWeight:'500',
@@ -9128,7 +9372,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 <div style={{fontSize:'12px',fontWeight:'600',color:'#111827',marginBottom:'6px',
                   display:'flex',alignItems:'center',gap:'10px'}}>
                   <span>Strength I RF Along Beam</span>
-                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                  <span style={STYLES.monoMed}>
                     Solid = Inventory (γ_LL={gamLL}) · Dashed cyan = Operating (γ_LL={gamLL_op.toFixed(2)})
                   </span>
                 </div>
@@ -9144,10 +9388,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   fontSize:'11.5px',fontWeight:'600',color:'#374151'}}>
                   Top 5 Critical Locations (Strength I Inventory)
                 </div>
-                <div style={{overflowX:'auto'}}>
+                <div style={STYLES.fullScroll}>
                   <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                     <thead>
-                      <tr style={{background:'#f9fafb'}}>
+                      <tr style={STYLES.bgLight}>
                         {['Node','Pos (ft)','φMn⁺','φVn','RF M⁺','RF V','RF Gov (Inv)','RF Gov (Op)','Controls','Status'].map(h=>(
                           <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',
                             color:'#6b7280',fontSize:'9.5px',borderBottom:'1px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
@@ -9162,7 +9406,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         return (
                           <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
                             <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
-                            <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                            <td style={STYLES.padding5}>{p.pos.toFixed(2)}</td>
                             <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.CmnPos}</td>
                             <td style={{padding:'5px 8px',color:'#dc2626'}}>{p.Cvn}</td>
                             <td style={{padding:'5px 8px',color:p.rfMpos>=1?'#059669':'#dc2626'}}>{p.rfMpos?.toFixed(3)??'—'}</td>
@@ -9172,7 +9416,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               {opP?.rfGov?.toFixed(3)??'—'}
                             </td>
                             <td style={{padding:'5px 8px',color:'#374151'}}>{p.governs==='M+'?'M⁺':p.governs==='M-'?'M⁻':'V'}</td>
-                            <td style={{padding:'5px 8px'}}>
+                            <td style={STYLES.padding5}>
                               <span style={{fontSize:'9px',fontWeight:'700',color:col,background:'#fff',
                                 padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                                 {p.rfGov>=1?'✓ OK':'❌'}
@@ -9348,7 +9592,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <span style={{fontSize:'10px',fontFamily:'monospace',color:'#059669',fontWeight:'600'}}>
                       ✓ Using actual MIDAS result forces per vehicle
                     </span>
-                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    <span style={STYLES.monoMed}>
                       {ratingMethod} · {ratingLimitState} · γ_DC={gamDC} · γ_DW={gamDW}
                     </span>
                     <button onClick={()=>{
@@ -9358,10 +9602,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='multi_vehicle_rating.csv';a.click();
                     }} style={{marginLeft:'auto',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',padding:'4px 10px',cursor:'pointer',fontSize:'11px',color:'#6b7280'}}>↓ CSV</button>
                   </div>
-                  <div style={{overflowX:'auto'}}>
+                  <div style={STYLES.fullScroll}>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',fontFamily:'monospace'}}>
                       <thead>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           <th rowSpan="2" style={{padding:'8px 12px',textAlign:'left',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Vehicle</th>
                           <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'11px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>GVW (T)</th>
                           <th rowSpan="2" style={{padding:'8px 10px',textAlign:'center',fontWeight:'600',color:'#374151',fontSize:'10px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}>Category</th>
@@ -9373,7 +9617,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             Operating
                           </th>
                         </tr>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           {['RF','Tons','Controls','Location'].map(h=>(
                             <th key={'i'+h} style={{padding:'5px 10px',textAlign:'center',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb',background:'#eff6ff'}}>{h}</th>
                           ))}
@@ -9460,7 +9704,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
               <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'14px 16px'}}>
                 <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px',flexWrap:'wrap'}}>
                   <span style={{fontSize:'13px',fontWeight:'600',color:'#111827'}}>Demand vs. Capacity</span>
-                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                  <span style={STYLES.monoMed}>
                     Solid = φR_n capacity · Dashed = γ·(DC+DW+LL) factored demand
                   </span>
                   <div style={{display:'flex',gap:'4px',marginLeft:'auto'}}>
@@ -9540,7 +9784,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   <input type="number" step="0.05" min="0.5" max="1.0" value={serviceIIRh}
                     onChange={e=>setRating('serviceIIRh',parseFloat(e.target.value)||1.0)}
                     style={{...INP2,width:'80px',fontFamily:'monospace',fontWeight:'600'}}/>
-                  <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>1.0 for homogeneous sections · AASHTO 6.10.1.10.1</span>
+                  <span style={STYLES.monoMed}>1.0 for homogeneous sections · AASHTO 6.10.1.10.1</span>
                 </div>
 
                 {/* No Sx warning */}
@@ -9569,10 +9813,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     ))}
                   </div>
 
-                  <div style={{overflowX:'auto'}}>
+                  <div style={STYLES.fullScroll}>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                       <thead>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           {['Node','Pos (ft)','Sx⁺ (in³)','Sx⁻ (in³)','Fyf (ksi)','Limit (ksi)',
                             'f_DC (ksi)','f_DW (ksi)','f_LL (ksi)','Demand M⁺ (ksi)','RF M⁺',
                             'f_LL neg (ksi)','Demand M⁻ (ksi)','RF M⁻','RF Gov','Status'].map(h=>(
@@ -9588,13 +9832,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           return (
                             <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
                               <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
-                              <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                              <td style={STYLES.padding5}>{p.pos.toFixed(2)}</td>
                               <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.SxPos||'—'}</td>
                               <td style={{padding:'5px 8px',color:'#7c3aed'}}>{p.SxNeg||'—'}</td>
-                              <td style={{padding:'5px 8px'}}>{p.Fyf}</td>
+                              <td style={STYLES.padding5}>{p.Fyf}</td>
                               <td style={{padding:'5px 8px',fontWeight:'600',color:'#059669'}}>{p.limit}</td>
-                              <td style={{padding:'5px 8px'}}>{p.fDCpos??'—'}</td>
-                              <td style={{padding:'5px 8px'}}>{p.fDWpos??'—'}</td>
+                              <td style={STYLES.padding5}>{p.fDCpos??'—'}</td>
+                              <td style={STYLES.padding5}>{p.fDWpos??'—'}</td>
                               <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.fLLpos??'—'}</td>
                               <td style={{padding:'5px 8px',fontWeight:'600',color:p.demPos>p.limit?'#dc2626':'#374151'}}>{p.demPos??'—'}</td>
                               <td style={{padding:'5px 8px',fontWeight:'700',color:p.rfPos>=1?'#059669':'#dc2626'}}>{p.rfPos?.toFixed(3)??'—'}</td>
@@ -9602,7 +9846,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               <td style={{padding:'5px 8px',fontWeight:'600',color:p.demNeg!=null&&p.demNeg>p.limit?'#dc2626':'#374151'}}>{p.demNeg??'—'}</td>
                               <td style={{padding:'5px 8px',fontWeight:'700',color:p.rfNeg!=null?(p.rfNeg>=1?'#059669':'#dc2626'):'#9ca3af'}}>{p.rfNeg?.toFixed(3)??'—'}</td>
                               <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
-                              <td style={{padding:'5px 8px'}}>
+                              <td style={STYLES.padding5}>
                                 <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
                                   padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                                   {p.rfGov>=1?'✓ OK':'❌ FAIL'}
@@ -9661,7 +9905,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         {label:'Cycles/truck n',     field:'fatigueCyclesN', val:fatigueCyclesN, step:1,   hint:'1 for most'},
                       ].map(({label,field,val,step,hint})=>(
                         <div key={field}>
-                          <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{label}</div>
+                          <div style={STYLES.monoSmall}>{label}</div>
                           <input type="number" step={step} min="1" value={val}
                             onChange={e=>setRating(field, parseFloat(e.target.value)||1)}
                             style={{...INP2,fontFamily:'monospace',fontWeight:'600',fontSize:'12px'}}/>
@@ -9706,10 +9950,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         ))}
                       </div>
                       {/* Category reference table */}
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                         <table style={{width:'100%',borderCollapse:'collapse',fontSize:'9.5px',fontFamily:'monospace'}}>
                           <thead>
-                            <tr style={{background:'#f9fafb'}}>
+                            <tr style={STYLES.bgLight}>
                               <th style={{padding:'4px 8px',textAlign:'left',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>Cat</th>
                               <th style={{padding:'4px 8px',textAlign:'right',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>(ΔF)_TH (ksi)</th>
                               <th style={{padding:'4px 8px',textAlign:'right',fontWeight:'500',color:'#9ca3af',borderBottom:'1px solid #e5e7eb'}}>A×10⁸ (ksi³)</th>
@@ -9789,10 +10033,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     ))}
                   </div>
 
-                  <div style={{overflowX:'auto'}}>
+                  <div style={STYLES.fullScroll}>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                       <thead>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           {['Node','Pos (ft)','Cat','Sx (in³)','M_max (ft·k)','M_min (ft·k)','ΔM (ft·k)','Δf (ksi)','(ΔF)_TH (ksi)','(ΔF)_n (ksi)','RF Fatigue I','RF Fatigue II','RF Gov','Controls','Status'].map(h=>(
                             <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',color:'#6b7280',
                               fontSize:'9.5px',borderBottom:'2px solid #e5e7eb',whiteSpace:'nowrap'}}>{h}</th>
@@ -9806,7 +10050,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           return (
                             <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
                               <td style={{padding:'5px 8px',fontWeight:'600',color:'#111827'}}>{p.node}</td>
-                              <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                              <td style={STYLES.padding5}>{p.pos.toFixed(2)}</td>
                               <td style={{padding:'5px 8px',fontWeight:'700',color:'#7c3aed'}}>{p.cat}</td>
                               <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{p.SxUsed}</td>
                               <td style={{padding:'5px 8px',color:'#059669'}}>{p.Mmax}</td>
@@ -9819,7 +10063,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               <td style={{padding:'5px 8px',color:p.rfII>=1?'#059669':'#dc2626',fontWeight:'600'}}>{p.rfII?.toFixed(3)??'—'}</td>
                               <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
                               <td style={{padding:'5px 8px',color:'#6b7280'}}>{p.governs}</td>
-                              <td style={{padding:'5px 8px'}}>
+                              <td style={STYLES.padding5}>
                                 <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
                                   padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                                   {p.rfGov>=1?'✓ OK':'❌ FAIL'}
@@ -9887,7 +10131,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                               ].map(([label,,val,unit])=>(
                                 <div key={label} style={{display:'flex',justifyContent:'space-between',
                                   padding:'2px 0',borderBottom:'1px solid #f3f4f6'}}>
-                                  <span style={{color:'#9ca3af'}}>{label}</span>
+                                  <span style={STYLES.dimText}>{label}</span>
                                   <span style={{fontWeight:'600',color:'#374151'}}>{val||'—'} {unit}</span>
                                 </div>
                               ))}
@@ -9932,10 +10176,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>
                       Node-by-Node Rating — PS Concrete Zones Only
                     </div>
-                    <div style={{overflowX:'auto'}}>
+                    <div style={STYLES.fullScroll}>
                       <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                         <thead>
-                          <tr style={{background:'#f9fafb'}}>
+                          <tr style={STYLES.bgLight}>
                             {['Node','Pos (ft)','Zone','fps (ksi)','a (in)','φMn (ft·k)','φVn (kips)',
                               'M_DC','M_LL','V_DC','V_LL','RF M⁺','RF V','RF Gov','Status'].map(h=>(
                               <th key={h} style={{padding:'5px 8px',textAlign:'left',fontWeight:'500',
@@ -9956,16 +10200,16 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             return (
                               <tr key={p.node} style={{borderBottom:'1px solid #f3f4f6',background:bg}}>
                                 <td style={{padding:'5px 8px',fontWeight:'600'}}>{p.node}</td>
-                                <td style={{padding:'5px 8px'}}>{p.pos.toFixed(2)}</td>
+                                <td style={STYLES.padding5}>{p.pos.toFixed(2)}</td>
                                 <td style={{padding:'5px 8px',color:'#7c3aed'}}>Z{zIdx}</td>
                                 <td style={{padding:'5px 8px',color:'#1d4ed8'}}>{fps.toFixed(2)}</td>
-                                <td style={{padding:'5px 8px'}}>{a.toFixed(3)}</td>
+                                <td style={STYLES.padding5}>{a.toFixed(3)}</td>
                                 <td style={{padding:'5px 8px',color:'#059669',fontWeight:'600'}}>{p.CmnPos}</td>
                                 <td style={{padding:'5px 8px',color:'#dc2626',fontWeight:'600'}}>{p.Cvn}</td>
-                                <td style={{padding:'5px 8px'}}>{p.Mdc.toFixed(1)}</td>
-                                <td style={{padding:'5px 8px'}}>{p.Mllpos.toFixed(1)}</td>
-                                <td style={{padding:'5px 8px'}}>{p.Vdc.toFixed(1)}</td>
-                                <td style={{padding:'5px 8px'}}>{p.Vll.toFixed(1)}</td>
+                                <td style={STYLES.padding5}>{p.Mdc.toFixed(1)}</td>
+                                <td style={STYLES.padding5}>{p.Mllpos.toFixed(1)}</td>
+                                <td style={STYLES.padding5}>{p.Vdc.toFixed(1)}</td>
+                                <td style={STYLES.padding5}>{p.Vll.toFixed(1)}</td>
                                 <td style={{padding:'5px 8px',color:p.rfMpos>=1?'#059669':'#dc2626',fontWeight:'600'}}>
                                   {p.rfMpos?.toFixed(3)??'—'}
                                 </td>
@@ -9973,7 +10217,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                                   {p.rfV?.toFixed(3)??'—'}
                                 </td>
                                 <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
-                                <td style={{padding:'5px 8px'}}>
+                                <td style={STYLES.padding5}>
                                   <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
                                     padding:'1px 5px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                                     {p.rfGov>=1?'✓ OK':'❌ FAIL'}
@@ -10049,7 +10293,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <input type="number" step="0.05" min="0" max="2" value={ps3GamLL}
                       onChange={e=>setRating('ps3GamLL',parseFloat(e.target.value)||0.8)}
                       style={{...INP2,width:'72px',fontFamily:'monospace',fontWeight:'700'}}/>
-                    <span style={{fontSize:'10px',fontFamily:'monospace',color:'#9ca3af'}}>
+                    <span style={STYLES.monoMed}>
                       LRFR: Inventory=0.8 · Operating=1.0 &nbsp;|&nbsp; LFR: 1.0
                     </span>
                   </div>
@@ -10094,10 +10338,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     ))}
                   </div>
 
-                  <div style={{overflowX:'auto'}}>
+                  <div style={STYLES.fullScroll}>
                     <table style={{width:'100%',borderCollapse:'collapse',fontSize:'11px',fontFamily:'monospace'}}>
                       <thead>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           {/* Group row */}
                           <th colSpan="2" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb',borderRight:'1px solid #e5e7eb'}}/>
                           <th colSpan="2" style={{padding:'5px 8px',textAlign:'center',fontSize:'9.5px',fontWeight:'600',
@@ -10114,7 +10358,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           </th>
                           <th colSpan="3" style={{padding:'5px 8px',borderBottom:'1px solid #e5e7eb'}}/>
                         </tr>
-                        <tr style={{background:'#f9fafb'}}>
+                        <tr style={STYLES.bgLight}>
                           {['Node','Pos (ft)',
                             'Sb (in³)','fpe (ksi)',
                             'M_DC','M_DW','M_LL',
@@ -10151,7 +10395,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                                 {p.rfNeg?.toFixed(3)??'—'}
                               </td>
                               <td style={{padding:'5px 8px',fontWeight:'800',color:col}}>{p.rfGov.toFixed(3)}</td>
-                              <td style={{padding:'5px 8px'}}>
+                              <td style={STYLES.padding5}>
                                 <span style={{fontSize:'9.5px',fontWeight:'600',color:col,background:'#fff',
                                   padding:'1px 6px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                                   {p.rfGov>=1?'✓ OK':p.rfGov>=0.5?'⚠ Low':'❌ FAIL'}
@@ -10179,6 +10423,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       {ratingMode==='arema'&&(()=>{
               const R2=cfg?.rating||{};
               const showMod = R2.arema_mod !== false;
+              const showNormal = R2.arema_show_normal !== false;
+              const showMaximum = R2.arema_show_maximum !== false;
+              const showModified = R2.arema_show_modified !== false;
+              const showShear = R2.arema_show_shear !== false;
+              const showFatigue = R2.arema_show_fatigue !== false;
               // All computed values come from _aremaParams (single source of truth)
               const {span,impAuto,impMan,DF,gauge,axle,eNum,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
                      n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,H_CF,
@@ -10242,7 +10491,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {[['DC / Dead Load','arema_dcLC',aremaDcLC],
                       ['LL (Live Load)', 'arema_llLC',aremaLlLC]].map(([lbl,key,val])=>(
                       <div key={key}>
-                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                        <div style={STYLES.monoSmall}>{lbl}</div>
                         <select style={{...INP,fontSize:'11px',fontFamily:'monospace'}} value={val} onChange={e=>setRating(key,e.target.value)}>
                           <option value="">— {key==='arema_dwLC'?'(none)':'required'} —</option>
                           {lcNames.map(n=><option key={n} value={n}>{n}</option>)}
@@ -10254,8 +10503,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   <div style={{marginTop:'8px',display:'flex',alignItems:'center',gap:'10px',
                     padding:'7px 10px',background:'#fafafa',borderRadius:'5px',border:'1px solid #e5e7eb'}}>
                     <div>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
-                        DL Factor &nbsp;<span style={{color:'#9ca3af'}}>(applied to all dead load results)</span>
+                      <div style={STYLES.monoSmall}>
+                        DL Factor &nbsp;<span style={STYLES.dimText}>(applied to all dead load results)</span>
                       </div>
                       <input type="number" step="0.01" min="0.5" max="3"
                         style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600',width:'90px'}}
@@ -10278,17 +10527,33 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'12px 16px',marginBottom:'10px'}}>
                   <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>AREMA Rating Parameters</div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:'8px'}}>
-                    {[['Span L (ft)','arema_span',span,1],['Dist. Factor DF','arema_DF',DF,0.01],
+                    {[['Dist. Factor DF','arema_DF',DF,0.01],
                       ['Track Gauge (in)','arema_gauge',gauge,0.5],['Gov. Axle Load (k)','arema_axle',axle,1],
                       ['No. of Girders','arema_n',n_gird,1],
-                      ['Girder Spacing (ft)','arema_S',S_gird,0.25],
                       ['Rail ht above top flange (ft)','arema_h_rail',h_rail,0.1]].map(([lbl,key,val,step])=>(
                       <div key={key}>
-                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>{lbl}</div>
+                        <div style={STYLES.monoSmall}>{lbl}</div>
                         <input type="number" step={step} style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600'}}
                           value={val} onChange={e=>setRating(key,parseFloat(e.target.value)||0)}/>
                       </div>
                     ))}
+                    <div>
+                      <div style={STYLES.monoSmall}>Span Length (ft)</div>
+                      <div style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600',display:'flex',alignItems:'center',background:'#f3f4f6',color:'#6b7280',cursor:'default'}}>
+                        {span.toFixed(2)} 
+                        <span style={{fontSize:'10px',color:'#9ca3af',marginLeft:'4px'}}>(from Geometry)</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={STYLES.monoSmall}>Girder Spacing (ft) — comma-separated</div>
+                      <input type="text" style={{...INP,fontSize:'11px',fontFamily:'monospace'}}
+                        value={R2.arema_spacings||''} 
+                        placeholder="e.g., 6,6,5.5 or 6 (uniform)"
+                        onChange={e=>setRating('arema_spacings',e.target.value)}/>
+                      <div style={{fontSize:'8px',color:'#9ca3af',marginTop:'2px'}}>
+                        Enter {n_gird-1} values for {n_gird} girders, or single value for uniform
+                      </div>
+                    </div>
                     {/* Distribution factor with calculator */}
                     <div style={{gridColumn:'1/-1',padding:'8px 10px',background:'#eff6ff',
                       border:'1px solid #93c5fd',borderRadius:'6px'}}>
@@ -10297,7 +10562,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       </div>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr auto',gap:'8px',alignItems:'end'}}>
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>
+                          <div style={STYLES.monoTiny}>
                             Track offset from bridge CL (ft)
                           </div>
                           <input type="number" step="0.25" value={e_track}
@@ -10310,7 +10575,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           <strong style={{color:'#1d4ed8'}}>= {DF_calc.toFixed(4)}</strong>
                         </div>
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>Current DF</div>
+                          <div style={STYLES.monoTiny}>Current DF</div>
                           <input type="number" step="0.01" value={DF}
                             style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'700',width:'100%'}}
                             onChange={e=>setRating('arema_DF',parseFloat(e.target.value)||0)}/>
@@ -10368,7 +10633,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       {/* LC selector + ref span */}
                       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:'8px',alignItems:'end'}}>
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>
+                          <div style={STYLES.monoTiny}>
                             MIDAS longitudinal load case
                           </div>
                           <select value={longLC} onChange={e=>{
@@ -10386,7 +10651,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           </select>
                         </div>
                         <div>
-                          <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#6b7280',marginBottom:'2px'}}>
+                          <div style={STYLES.monoTiny}>
                             Reference span L_ref (ft) — span used to build the MIDAS LC
                           </div>
                           <input type="number" step="5" value={long_L_ref}
@@ -10399,7 +10664,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       </div>}
                     </div>
                     <div>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
+                      <div style={STYLES.monoSmall}>
                         Impact (1+I)&nbsp;<label style={{cursor:'pointer'}}>
                           <input type="checkbox" checked={impAuto} onChange={e=>setRating('arema_imp_auto',e.target.checked)} style={{accentColor:'#d97706'}}/>auto
                         </label>
@@ -10431,17 +10696,31 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <input type="checkbox" checked={showMod} onChange={e=>setRating('arema_mod',e.target.checked)} style={{accentColor:'#d97706'}}/>
                         Show Modified
                       </label>
+                      {/* Rating check toggles for envelope */}
+                      <div style={{gridColumn:'1/-1',padding:'8px 10px',background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:'4px',marginTop:'4px'}}>
+                        <div style={{fontSize:'9px',fontWeight:'600',color:'#374151',marginBottom:'6px'}}>Envelope Display:</div>
+                        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'4px'}}>
+                          {[['Normal','arema_show_normal'],['Maximum','arema_show_maximum'],
+                            ['Modified','arema_show_modified'],['Shear','arema_show_shear'],
+                            ['Fatigue','arema_show_fatigue']].map(([lbl,key])=>(
+                            <label key={key} style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',fontSize:'10px',fontFamily:'monospace',color:'#6b7280'}}>
+                              <input type="checkbox" checked={R2[key]!==false} onChange={e=>setRating(key,e.target.checked)} style={{accentColor:'#6366f1'}}/>
+                              {lbl}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                     {/* Centrifugal force */}
                     <div>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
-                        Curve Radius (ft) <span style={{color:'#9ca3af'}}>0=straight</span>
+                      <div style={STYLES.monoSmall}>
+                        Curve Radius (ft) <span style={STYLES.dimText}>0=straight</span>
                       </div>
                       <input type="number" step="50" min="0" style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600'}}
                         value={curveR} onChange={e=>setRating('arema_curveR',parseFloat(e.target.value)||0)}/>
                     </div>
                     <div>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>CF Speed (mph)</div>
+                      <div style={STYLES.monoSmall}>CF Speed (mph)</div>
                       <input type="number" step="5" min="0" style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600'}}
                         value={curveV} onChange={e=>setRating('arema_curveV',parseFloat(e.target.value)||0)}/>
                       {curveR>0&&<div style={{fontSize:'8px',color:'#d97706',marginTop:'2px',fontFamily:'monospace'}}>
@@ -10472,7 +10751,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                       {/* Category */}
                       <div>
-                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
+                        <div style={STYLES.monoSmall}>
                           Fatigue Category
                         </div>
                         <select style={{...INP,fontSize:'11px',fontFamily:'monospace'}}
@@ -10488,7 +10767,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                       {/* Beta — fatigue impact factor */}
                       <div>
-                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
+                        <div style={STYLES.monoSmall}>
                           β — Fatigue impact factor
                         </div>
                         <input type="number" step="0.01" min="0" max="1"
@@ -10502,7 +10781,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                       {/* Alpha — live load reduction */}
                       <div>
-                        <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',marginBottom:'3px'}}>
+                        <div style={STYLES.monoSmall}>
                           α — Live load reduction factor
                         </div>
                         <input type="number" step="0.01" min="0" max="1"
@@ -10625,7 +10904,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <div style={{color:'#c2410c',fontWeight:'700',marginTop:'2px'}}>
                           M = R×L/4 = <strong>{M_CF.toFixed(2)} ft-k</strong>
                         </div>
-                      </>:<div style={{color:'#9ca3af'}}>M_CF = 0 (no curvature)</div>}
+                      </>:<div style={STYLES.dimText}>M_CF = 0 (no curvature)</div>}
                     </div>
                   </div>
                   {/* Longitudinal placeholder */}
@@ -10996,11 +11275,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           </span>
                         )}
                       </summary>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'600px',
                         fontSize:'9.5px',fontFamily:'monospace'}}>
                         <thead>
-                          <tr style={{background:'#f9fafb'}}>
+                          <tr style={STYLES.bgLight}>
                             <th style={{border:'1px solid #9ca3af',padding:'5px 8px',
                               textAlign:'left',fontWeight:'600',minWidth:'220px'}}>
                               BRIDGE COMPONENT
@@ -11090,34 +11369,123 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   </div>);
                 })()}
 
+                {/* ── ROCKING EFFECTS DETAIL ── */}
+                {aremaAsdData.length>0&&(()=>{
+                  const [showRocking, setShowRocking] = React.useState(false);
+                  
+                  // Recalculate for display (same as in calculation)
+                  const n_gird = Math.max(2, Math.round(+(R2.arema_n ?? 2)));
+                  const parseSpacings = (input, numGirders) => {
+                    if (!input || typeof input !== 'string') return null;
+                    const vals = input.split(',').map(s => parseFloat(s.trim())).filter(v => v > 0);
+                    if (vals.length === 1) return Array(numGirders - 1).fill(vals[0]);
+                    if (vals.length === numGirders - 1) return vals;
+                    return null;
+                  };
+                  const spacings = parseSpacings(R2.arema_spacings, n_gird) ?? Array(n_gird-1).fill(+(R2.arema_S ?? 6.0));
+                  
+                  // Girder positions
+                  const gPos = (() => {
+                    const pos = [0];
+                    for (let i = 0; i < spacings.length; i++) pos.push(pos[pos.length-1] + spacings[i]);
+                    return pos;
+                  })();
+                  const gCent = gPos.reduce((s,p)=>s+p, 0) / n_gird;
+                  const gd = gPos.map(p => p - gCent);
+                  const Ix_grp = gd.reduce((s,d)=>s+d*d, 0);
+                  const d_max = Math.max(...gd.map(Math.abs));
+                  
+                  // Rocking impact
+                  const gauge = +(R2.arema_gauge ?? 56.5) / 12;
+                  const I_rock = 0.20 * gauge / spacings[0];
+                  
+                  // Load distribution
+                  const e_track = 0; // centered
+                  const DF_base = 1 / n_gird;
+                  const DF = DF_base + e_track * d_max / Ix_grp;
+                  
+                  return (
+                    <div style={{background:'#f0f9ff',border:'1px solid #0369a1',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginBottom:showRocking?'12px':'0'}}
+                        onClick={()=>setShowRocking(!showRocking)}>
+                        <span style={{fontSize:'11px',fontWeight:'600',color:'#0369a1'}}>📐 Rocking Effects & Load Distribution Details</span>
+                        <span style={{fontSize:'10px',color:'#0369a1'}}>({showRocking?'▼':'▶'})</span>
+                      </div>
+                      
+                      {showRocking&&(
+                      <div style={{fontSize:'10px',fontFamily:'monospace',lineHeight:'1.6',color:'#1e293b'}}>
+                        {/* Girder Group Geometry */}
+                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
+                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Girder Group Geometry</div>
+                          <div>
+                            <div style={{marginBottom:'6px'}}>n<sub>gird</sub> = {n_gird} girders</div>
+                            <div style={{marginBottom:'6px'}}>Spacings: [{spacings.map(s=>s.toFixed(2)).join(', ')}] ft</div>
+                            <div style={{marginBottom:'6px'}}>Positions: [{gPos.map(p=>p.toFixed(2)).join(', ')}] ft</div>
+                            <div style={{marginBottom:'6px'}}>Group center: {gCent.toFixed(3)} ft</div>
+                            <div style={{marginBottom:'6px'}}>Eccentricities: [{gd.map(d=>d.toFixed(3)).join(', ')}] ft</div>
+                            <div style={{marginBottom:'6px',fontWeight:'600'}}>I<sub>x</sub> = Σd² = {Ix_grp.toFixed(3)} ft²</div>
+                            <div style={{fontWeight:'600'}}>d<sub>max</sub> = {d_max.toFixed(3)} ft (governing girder)</div>
+                          </div>
+                        </div>
+                        
+                        {/* Rocking Impact */}
+                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
+                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Rocking Impact (AREMA §1.3.6)</div>
+                          <div style={{marginBottom:'6px'}}>Equation: I<sub>rock</sub> = 0.20 × gauge<sub>ft</sub> / S<sub>1</sub></div>
+                          <div style={{marginBottom:'6px'}}>gauge = {gauge.toFixed(4)} ft (standard: 4.71 ft / 12)</div>
+                          <div style={{marginBottom:'6px'}}>S<sub>1</sub> = {spacings[0].toFixed(2)} ft (first spacing)</div>
+                          <div style={{fontWeight:'600',color:'#0369a1'}}>I<sub>rock</sub> = {(I_rock*100).toFixed(3)}% (added to impact factor)</div>
+                        </div>
+                        
+                        {/* Load Distribution */}
+                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px'}}>
+                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Load Distribution Factor (Lever Rule)</div>
+                          <div style={{marginBottom:'6px'}}>Equation: DF = 1/n + e<sub>track</sub> × d<sub>max</sub> / I<sub>x</sub></div>
+                          <div style={{marginBottom:'6px'}}>DF<sub>base</sub> = 1/{n_gird} = {DF_base.toFixed(4)}</div>
+                          <div style={{marginBottom:'6px'}}>e<sub>track</sub> = {e_track.toFixed(2)} ft (track centered)</div>
+                          <div style={{marginBottom:'6px'}}>Moment term = {e_track} × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)} = {(e_track * d_max / Ix_grp).toFixed(6)}</div>
+                          <div style={{fontWeight:'600',color:'#0369a1'}}>DF = {DF.toFixed(4)} (fraction of load on governing girder)</div>
+                        </div>
+                      </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* Multi-vehicle table */}
                 {aremaMultiData.length>0&&(
                 <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px',overflowX:'auto'}}>
                   <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>🚛 Multi-Vehicle AREMA ASD Rating</div>
                   <table style={{borderCollapse:'collapse',fontSize:'10.5px',fontFamily:'monospace',width:'100%',minWidth:'540px'}}>
                     <thead>
-                      <tr style={{background:'#f3f4f6'}}>
-                        {['Vehicle','Load Case','RF Normal','RF Max',...(showMod?['RF Mod']:[]),'RF Fat','Gov. Node N'].map(h=>(
+                      <tr style={STYLES.bgGray}>
+                        {['Vehicle','Load Case',...(showNormal?['RF Normal']:[]),...(showMaximum?['RF Max']:[]),...(showModified?['RF Mod']:[]),...(showShear?['RF Shear']:[]),...(showFatigue?['RF Fat']:[]),'Gov. Node'].map(h=>(
                           <th key={h} style={{padding:'5px 8px',border:'1px solid #e5e7eb',
-                            textAlign:h==='Vehicle'?'left':'center',
-                            background:h==='RF Fat'?'#fdf4ff':h.includes('Max')?'#fffbeb':h.includes('Norm')?'#f0fdf4':undefined}}>{h}</th>
+                            textAlign:h==='Vehicle'||h==='Load Case'||h==='Gov. Node'?'left':'center',fontSize:'10px',fontWeight:'600',
+                            background:h==='RF Fat'?'#fdf4ff':h==='RF Shear'?'#fef3c7':h.includes('Max')?'#fffbeb':h.includes('Norm')?'#f0fdf4':h.includes('Mod')?'#fffbeb':undefined}}>{h}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {aremaMultiData.map(v=>(
-                        <tr key={v.name} style={{background:'#fff'}}>
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',fontWeight:'600'}}>{v.label}</td>
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',color:'#6b7280',fontSize:'9.5px',textAlign:'center'}}>{v.posLC}</td>
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#f0fdf4',fontWeight:'700',color:rfColor(v.rfN)}}>{rfFmt(v.rfN)}</td>
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fff7ed',fontWeight:'700',color:rfColor(v.rfX)}}>{rfFmt(v.rfX)}</td>
-                          {showMod&&<>
-                            <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fffbeb',fontWeight:'700',color:rfColor(v.rfM)}}>{rfFmt(v.rfM)}</td>
-                          </>}
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fdf4ff',fontWeight:'700',color:rfColor(v.rfFat)}}>{rfFmt(v.rfFat)}</td>
-                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',color:'#6b7280',fontSize:'9.5px',textAlign:'center'}}>N{v.nodeN}@{v.posN?.toFixed(1)}ft</td>
+                      {aremaMultiData.map(v=>{
+                        const allLC = (cfg?.rating?.arema_llLC || v.posLC).replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)');
+                        const govShear = Math.min(v.rfvN!=null&&isFinite(v.rfvN)?v.rfvN:Infinity, v.rfvM!=null&&isFinite(v.rfvM)?v.rfvM:Infinity);
+                        return (
+                        <tr key={v.name} style={{background:'#fff',borderBottom:'1px solid #f3f4f6'}}>
+                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',fontWeight:'600',fontSize:'11px'}}>{v.label}</td>
+                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',color:'#6b7280',fontSize:'9px',textAlign:'left'}}>
+                            <div style={{fontSize:'9px'}}>{v.posLC}</div>
+                            <div style={{fontSize:'8px',color:'#059669',fontStyle:'italic'}}>shear: {allLC}</div>
+                          </td>
+                          {showNormal&&<td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#f0fdf4',fontWeight:'700',color:rfColor(v.rfN),fontSize:'11px'}}>{rfFmt(v.rfN)}</td>}
+                          {showMaximum&&<td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fffbeb',fontWeight:'700',color:rfColor(v.rfX),fontSize:'11px'}}>{rfFmt(v.rfX)}</td>}
+                          {showModified&&<td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fffbeb',fontWeight:'700',color:rfColor(v.rfM),fontSize:'11px'}}>{rfFmt(v.rfM)}</td>}
+                          {showShear&&<td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fef3c7',fontWeight:'700',color:rfColor(govShear),fontSize:'11px'}}>{rfFmt(govShear)}</td>}
+                          {showFatigue&&<td style={{padding:'4px 8px',border:'1px solid #e5e7eb',textAlign:'center',background:'#fdf4ff',fontWeight:'700',color:rfColor(v.rfFat),fontSize:'11px'}}>{rfFmt(v.rfFat)}</td>}
+                          <td style={{padding:'4px 8px',border:'1px solid #e5e7eb',color:'#6b7280',fontSize:'9px',textAlign:'left'}}>N{v.nodeN}@{v.posN?.toFixed(1)}ft</td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -11148,7 +11516,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       rfcX:lp(lo.rfcX,hi.rfcX), rftX:lp(lo.rftX,hi.rftX), rfvX:lp(lo.rfvX,hi.rfvX),
                       rfcM:lp(lo.rfcM,hi.rfcM), rftM:lp(lo.rftM,hi.rftM), rfvM:lp(lo.rfvM,hi.rfvM),
                       gN:lp(lo.gN,hi.gN), gX:lp(lo.gX,hi.gX), gM:lp(lo.gM,hi.gM),
-                      rfFat:lp(lo.rfFat,hi.rfFat)};
+                      rfFat:lp(lo.rfFat,hi.rfFat),
+                      dV_N:lp(lo.dV_N,hi.dV_N), dV_mod:lp(lo.dV_mod,hi.dV_mod)};
                   };
                   const tableVehicles = aremaMultiData.filter(v=>!isLong(v));
                   // Per-vehicle governing node index (by table type)
@@ -11190,17 +11559,22 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   // Per-vehicle groups for shear
                   const vehShearGroups = () => tableVehicles.map((veh,i)=>({
                     label: veh.name||`Veh ${i+1}`,
-                    cols:  ['RF_N','RF_M ★','Rating'],
+                    cols:  ['fv,LL (ksi)','Fv,LL (kip)','RFₙ','Rₙ','RFₘₐˣ','Rₘₐˣ'],
                     bg:    vehColor(i)+'22', colBg: vehColor(i)+'11', tc: vehColor(i),
                   }));
                   const vehShearCells = (p) => tableVehicles.map((veh,i)=>{
                     const r=vRF(veh,p.pos);
                     const col=vehColor(i);
-                    const rv=Math.min(...[r.rfvN,r.rfvM].filter(v=>flt(v)));
+                    const aw=p.sec?.Aw||null;
+                    const fvLL = (r.dV_N!=null&&aw) ? f2s(r.dV_N/aw) : '—';
+                    const FvLL = r.dV_N!=null ? f1(r.dV_N) : '—';
                     return (<React.Fragment key={veh.name||i}>
-                      {TD(f3(r.rfvN),{bg:col+'18',c:rfC(r.rfvN)})}
-                      {TD(f3(r.rfvM),{bg:col+'30',fw:700,c:rfC(r.rfvM)})}
-                      {TD(flt(rv)?(rv*eNum).toFixed(1):'—',{bg:col+'50',fw:700,c:rfC(rv)})}
+                      {TD(fvLL,{bg:col+'15'})}
+                      {TD(FvLL,{bg:col+'15'})}
+                      {TD(f3(r.rfvN),{bg:col+'25',c:rfC(r.rfvN)})}
+                      {TD(flt(r.rfvN)?(r.rfvN*eNum).toFixed(1):'—',{bg:col+'35',fw:700,c:rfC(r.rfvN)})}
+                      {TD(f3(r.rfvX),{bg:col+'25',c:rfC(r.rfvX)})}
+                      {TD(flt(r.rfvX)?(r.rfvX*eNum).toFixed(1):'—',{bg:col+'35',fw:700,c:rfC(r.rfvX)})}
                     </React.Fragment>);
                   });
                   // Per-vehicle groups for fatigue
@@ -11347,7 +11721,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {wrap(<>
                       <SecHdr icon="✓" title="NORMAL — Flexure" color="#15803d" bg="#f0fdf4"
                         sub={`Fb_N=${govAsdN?.allo?.Fb_N.toFixed(2)} ksi (comp) · Ft_N=${govAsdN?.allo?.Ft_N.toFixed(2)} ksi (tens) · denom = MLL×(1+I)×DF + M_CF`}/>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f0fdf4" tc="#15803d" groups={[
                           {label:'Location',  cols:['Node','Pos (ft)'],                                              bg:'#f0fdf4'},
@@ -11388,7 +11762,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {wrap(<>
                       <SecHdr icon="⚡" title="MAXIMUM — Flexure" color="#c2410c" bg="#fff7ed"
                         sub={`K=0.80Fy · Fb_X=${govAsdX?.allo?.Fb_X.toFixed(2)} ksi (K-factor LTB) · same denom as Normal · no wind/rock`}/>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#fff7ed" tc="#c2410c" groups={[
                           {label:'Location',        cols:['Node','Pos (ft)'],                                   bg:'#fff7ed'},
@@ -11427,7 +11801,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {wrap(<>
                       <SecHdr icon="🌬" title="MODIFIED — Flexure" color="#92400e" bg="#fffbeb"
                         sub={`K=0.80Fy (same allowable as Maximum) · denom = MLL×(1+I)×DF + M_CF + Wind + Rocking`}/>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#fffbeb" tc="#92400e" groups={[
                           {label:'Location',        cols:['Node','Pos (ft)'],                                       bg:'#fffbeb'},
@@ -11466,13 +11840,12 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {wrap(<>
                       <SecHdr icon="✂" title="SHEAR — All Cases" color="#374151" bg="#f9fafb"
                         sub={`Vn_N = Fs_N×Aw · Vn_X = Fs_X×Aw · RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF`}/>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'700px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f3f4f6" tc="#374151" groups={[
-                          {label:'Location',        cols:['Node','Pos (ft)'],                        bg:'#f3f4f6'},
-                          {label:'Dead Load',       cols:['VDL (k)','fv_DL (ksi)'],                  bg:'#f9fafb',colBg:'#f3f4f6'},
-                          {label:'Live Load (E-80)',cols:['dV (k)','fv_LL (ksi)'],                   bg:'#eff6ff',colBg:'#dbeafe'},
-                          {label:'Capacity',        cols:['Vn_N (k)','Fs_N (ksi)','Vn_X (k)'],      bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Location', cols:['Node','Pos (ft)'],                                                                    bg:'#f3f4f6'},
+                          {label:'Capacity', cols:['Aw (in²)','fv,N (ksi)','fv,M (ksi)','Vn,N (kip)','Vn,M (kip)'],               bg:'#f9fafb',colBg:'#f3f4f6'},
+                          {label:'Dead Load',cols:['fv,DL (ksi)','VDL (kip)'],                                                           bg:'#fafff5',colBg:'#f0fdf4'},
                           ...vehShearGroups(),
                         ]}/>
                         <tbody>
@@ -11480,13 +11853,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           const isG=!p.interpolated&&(govAsdN?.node===p.node||govAsdX?.node===p.node);
                           const isCalcX=!!p._isCalcX;
                           return mkRow(p,isG,isCalcX,<>
-                            {TD(f1(p.VDL))}
-                            {TD(p.sec?.Aw ? f2s(p.VDL/p.sec.Aw) : '—')}
-                            {TD(f1(p.dV),{bg:'#dbeafe'})}
-                            {TD(p.sec?.Aw ? f2s(p.dV/p.sec.Aw) : '—',{bg:'#dbeafe'})}
-                            {TD(f1(p.VnN),{bg:'#f3f4f6'})}
+                            {TD(p.sec?.Aw?.toFixed(3)??'—',{bg:'#f3f4f6'})}
                             {TD(p.allo?.Fs_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(p.allo?.Fs_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
+                            {TD(f1(p.VnN),{bg:'#f3f4f6'})}
                             {TD(f1(p.VnX),{bg:'#f3f4f6'})}
+                            {TD(p.sec?.Aw ? f2s(p.VDL/p.sec.Aw) : '—',{bg:'#f0fdf4'})}
+                            {TD(f1(p.VDL),{bg:'#f0fdf4'})}
                             {vehShearCells(p)}
                           </>);
                         })}
@@ -11499,7 +11872,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {wrap(<>
                       <SecHdr icon="💜" title="FATIGUE — Stress Range" color="#7e22ce" bg="#faf5ff"
                         sub={`Category ${_aremaParams.fatCat} · SFT=${_aremaParams.SFT} ksi · RF = SFT×Sx_bot_net/12 / dM`}/>
-                      <div style={{overflowX:'auto'}}>
+                      <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'540px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#faf5ff" tc="#7e22ce" groups={[
                           {label:'Location',   cols:['Node','Pos (ft)'],                          bg:'#faf5ff'},
@@ -12120,7 +12493,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   {/* Column headers */}
                   <div style={{display:'grid',gridTemplateColumns:'1fr 110px 32px',gap:'8px',
                     padding:'0 4px',fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',textTransform:'uppercase',letterSpacing:'0.06em'}}>
-                    <span>Load Case</span><span style={{textAlign:'center'}}>Factor</span><span/>
+                    <span>Load Case</span><span style={STYLES.center}>Factor</span><span/>
                   </div>
                   {combo.terms.map((term,ti)=>{
                     const tKey = term._key || `${combo.id}_${ti}`;
@@ -12283,7 +12656,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 Peak Values — {ch.label} ({ch.unit})
               </div>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:'12px',fontFamily:'monospace'}}>
-                <thead><tr style={{background:'#f9fafb'}}>
+                <thead><tr style={STYLES.bgLight}>
                   {['Load Case','Max ↑','Min ↓','Range'].map(h=><th key={h} style={{padding:'6px 14px',textAlign:'left',fontWeight:'500',color:'#6b7280',fontSize:'10px',borderBottom:'1px solid #e5e7eb'}}>{h}</th>)}
                 </tr></thead>
                 <tbody>
@@ -12514,12 +12887,13 @@ const DEFAULT_CFG = {
     serviceIIDcLC:'', serviceIIDwLC:'', serviceIILLposLC:'', serviceIILLnegLC:'',
     serviceIIRh:1.0,
     // AREMA ASD rating parameters
-    arema_span:0, arema_DF:0.5, arema_gauge:56.5, arema_axle:40,
-    arema_n:2, arema_S:6.0, arema_h_rail:1.5, arema_ballast:false,
+    arema_DF:0.5, arema_gauge:56.5, arema_axle:40,
+    arema_n:2, arema_S:6.0, arema_spacings:'', arema_h_rail:1.5, arema_ballast:false,
     arema_imp_auto:true, arema_imp_man:0.25,
     arema_curveR:0, arema_curveV:0,
     arema_fatCat:'D', arema_fatAlpha:0.85, arema_fatBeta:0.15, arema_mod:true,
-    arema_dcLC:'', arema_llLC:'', arema_longLC:'', arema_dlFactor:1.0, arema_userPos:'',
+    arema_dcLC:'', arema_llLC:'', arema_llNegLC:'', arema_longLC:'', arema_dlFactor:1.0, arema_userPos:'',
+    arema_show_normal:true, arema_show_maximum:true, arema_show_modified:true, arema_show_shear:true, arema_show_fatigue:true,
     arema_reportProjectNum:'', arema_reportOwner:'', arema_reportInspector:'', arema_reportRatingDate:'',
     arema_reportNotes:'',
     arema_reportSections:{cover:true,toc:true,summaryTable:true,geometry:true,
@@ -13306,76 +13680,112 @@ function AremaReportSettingsPanel({ cfg, setRating }) {
 
 function AremaRFChart({ data, vehicles=[] }) {
   const divRef   = useRef(null);
-  const [hidden, setHidden] = React.useState({});
-  const toggle = key => setHidden(h=>({...h,[key]:!h[key]}));
+  const [hiddenChecks, setHiddenChecks] = React.useState({});
+  const [hiddenVehicles, setHiddenVehicles] = React.useState({});
+  const toggleCheck = key => setHiddenChecks(h=>({...h,[key]:!h[key]}));
+  const toggleVehicle = key => setHiddenVehicles(h=>({...h,[key]:!h[key]}));
+  
+  const checkDefs = [
+    {key:'gN',  label:'Normal',  color:'#16a34a'},
+    {key:'gX',  label:'Max',     color:'#c2410c'},
+    {key:'gM',  label:'Mod',     color:'#d97706'},
+    {key:'shear',label:'Shear',  color:'#eab308'},
+    {key:'rfFat',label:'Fatigue',color:'#7e22ce'},
+  ];
   const vehColors = ['#0284c7','#0891b2','#6366f1','#ec4899','#14b8a6','#f97316'];
+  const vehDefs = vehicles.map((v,i)=>({key:'veh_'+v.name, label:v.name||`Veh${i+1}`, color:vehColors[i%6], vehicle:v}));
 
   useEffect(()=>{
     if(!divRef.current) return;
-    const e80Series=[
-      {key:'gN',  name:'E-80 Normal', color:'#16a34a'},
-      {key:'gX',  name:'E-80 Max',    color:'#c2410c'},
-      {key:'gM',  name:'E-80 Mod',    color:'#d97706'},
-      {key:'rfFat',name:'E-80 Fat',   color:'#7e22ce'},
-    ];
     const traces=[];
-    e80Series.forEach(s=>{
-      if(hidden[s.key]) return;
-      const pts=(data||[]).filter(p=>p[s.key]!=null&&isFinite(p[s.key]));
-      traces.push({x:pts.map(p=>p.pos),y:pts.map(p=>p[s.key]),name:s.name,
-        line:{color:s.color,width:2.5},mode:'lines',type:'scatter',
-        customdata:pts.map(p=>[p.node?`N${p.node}`:p.pos.toFixed(2),p.pos.toFixed(2),(p[s.key]*80).toFixed(1)]),
-        hovertemplate:'<b>%{customdata[0]}</b> · %{customdata[1]} ft<br>RF: %{y:.3f}<br>Rating: %{customdata[2]}<extra>'+s.name+'</extra>'});
+    
+    // Generate traces for each vehicle + check combination
+    vehDefs.forEach((vdef)=>{
+      if(hiddenVehicles[vdef.key]) return;
+      const veh = vdef.vehicle;
+      const pts = veh.allNodeRes || [];
+      
+      checkDefs.forEach((checkDef)=>{
+        if(hiddenChecks[checkDef.key]) return;
+        
+        let yValues;
+        if(checkDef.key === 'shear'){
+          // For shear: min of rfvN and rfvM
+          yValues = pts.map(p=>{
+            const vals = [p.rfvN, p.rfvM].filter(v=>v!=null&&isFinite(v));
+            return vals.length ? Math.min(...vals) : null;
+          });
+        } else {
+          // For other checks, use the specific key
+          yValues = pts.map(p=>p[checkDef.key]);
+        }
+        
+        const validPts = pts.filter((_,i)=>yValues[i]!=null&&isFinite(yValues[i]));
+        if(!validPts.length) return;
+        
+        const validY = validPts.map((_,i)=>yValues[pts.indexOf(validPts[i])]);
+        
+        traces.push({
+          x: validPts.map(p=>p.pos),
+          y: validY,
+          name: `${vdef.label} ${checkDef.label}`,
+          line: {color:checkDef.color, width:1.8, dash:vdef.key.startsWith('veh_E-80')?'solid':'dot'},
+          mode: 'lines',
+          type: 'scatter',
+          customdata: validPts.map(p=>[p.node?`N${p.node}`:p.pos.toFixed(2), p.pos.toFixed(2)]),
+          hovertemplate: '<b>%{customdata[0]}</b> · %{customdata[1]} ft<br>'+checkDef.label+' RF: %{y:.3f}<extra>'+vdef.label+'</extra>'
+        });
+      });
     });
-    (vehicles||[]).forEach((veh,i)=>{
-      const key='veh_'+veh.name;
-      if(hidden[key]) return;
-      const pts=(veh.allNodeRes||[]);
-      const col=vehColors[i%vehColors.length];
-      traces.push({
-        x:pts.map(p=>p.pos),
-        y:pts.map(p=>{const vals=[p.gN,p.gX,p.gM].filter(v=>v!=null&&isFinite(v));return vals.length?Math.min(...vals):null;}),
-        name:(veh.name||`Veh ${i+1}`)+' (gov)',
-        line:{color:col,width:2,dash:'dot'},mode:'lines',type:'scatter',
-        customdata:pts.map(p=>[p.node?`N${p.node}`:p.pos.toFixed(2),p.pos.toFixed(2)]),
-        hovertemplate:'<b>%{customdata[0]}</b> · %{customdata[1]} ft<br>RF: %{y:.3f}<extra>'+(veh.name||'')+'</extra>'});
-    });
+    
     if(!traces.length){Plotly.purge(divRef.current);return;}
-    const allPts=[...(data||[]),...(vehicles||[]).flatMap(v=>v.allNodeRes||[])];
+    const allPts=[...(vehicles||[]).flatMap(v=>v.allNodeRes||[])];
     const xMin=allPts.length?Math.min(...allPts.map(p=>p.pos)):0;
     const xMax=allPts.length?Math.max(...allPts.map(p=>p.pos)):1;
+    
     Plotly.newPlot(divRef.current,traces,{
       shapes:[{type:'rect',x0:xMin,x1:xMax,y0:0,y1:1,fillcolor:'#fee2e2',opacity:0.2,line:{width:0},layer:'below'},
               {type:'line',x0:xMin,x1:xMax,y0:1,y1:1,line:{color:'#dc2626',width:1.5,dash:'dash'}}],
       annotations:[{x:xMax,y:1,xanchor:'right',yanchor:'bottom',text:'RF = 1.0',showarrow:false,font:{color:'#dc2626',size:10,family:'monospace'}}],
       xaxis:{title:{text:'Position (ft)',font:{size:10,family:'monospace'}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6',range:[xMin,xMax]},
       yaxis:{title:{text:'RF',font:{size:10,family:'monospace'}},tickfont:{family:'monospace',size:9},gridcolor:'#f3f4f6'},
-      legend:{orientation:'h',y:1.14,font:{family:'monospace',size:9}},
+      legend:{orientation:'h',y:1.14,font:{family:'monospace',size:8.5},x:0},
       margin:{l:48,r:16,t:38,b:40},paper_bgcolor:'#fff',plot_bgcolor:'#fafafa',hovermode:'x unified',
     },{responsive:true,displayModeBar:true,displaylogo:false,modeBarButtonsToRemove:['select2d','lasso2d'],scrollZoom:true});
     return()=>{if(divRef.current)Plotly.purge(divRef.current);};
-  },[data,vehicles,hidden]);
+  },[vehicles,hiddenChecks,hiddenVehicles]);
 
-  const allKeys=[
-    {key:'gN',label:'Normal',color:'#16a34a'},{key:'gX',label:'Max',color:'#c2410c'},
-    {key:'gM',label:'Mod',color:'#d97706'},{key:'rfFat',label:'Fatigue',color:'#7e22ce'},
-    ...(vehicles||[]).map((v,i)=>({key:'veh_'+v.name,label:v.name||`Veh${i+1}`,color:vehColors[i%6]})),
-  ];
   return (
     <div>
-      <div style={{display:'flex',flexWrap:'wrap',gap:'4px',padding:'5px 8px 6px',borderBottom:'1px solid #e5e7eb',background:'#f9fafb'}}>
-        <span style={{fontSize:'8px',fontFamily:'monospace',color:'#9ca3af',alignSelf:'center',marginRight:'4px'}}>Show:</span>
-        {allKeys.map(({key,label,color})=>(
-          <button key={key} onClick={()=>toggle(key)} style={{
-            padding:'2px 8px',borderRadius:'12px',fontSize:'8.5px',fontFamily:'monospace',
-            cursor:'pointer',border:`1px solid ${hidden[key]?'#e5e7eb':color}`,
-            background:hidden[key]?'#f9fafb':color+'18',color:hidden[key]?'#9ca3af':color,
-            fontWeight:hidden[key]?400:700,textDecoration:hidden[key]?'line-through':'none'}}>
-            {label}
-          </button>
-        ))}
+      <div style={{padding:'8px',background:'#f9fafb',borderBottom:'1px solid #e5e7eb'}}>
+        {/* Check toggles */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:'6px',marginBottom:'6px'}}>
+          <span style={{fontSize:'8px',fontFamily:'monospace',color:'#9ca3af',alignSelf:'center',fontWeight:'600'}}>Rating Checks:</span>
+          {checkDefs.map(({key,label,color})=>(
+            <button key={key} onClick={()=>toggleCheck(key)} style={{
+              padding:'3px 10px',borderRadius:'14px',fontSize:'9px',fontFamily:'monospace',fontWeight:'600',
+              cursor:'pointer',border:`1.5px solid ${hiddenChecks[key]?'#e5e7eb':color}`,
+              background:hiddenChecks[key]?'#fafafa':color+'22',color:hiddenChecks[key]?'#9ca3af':color,
+              textDecoration:hiddenChecks[key]?'line-through':'none'}}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Vehicle toggles */}
+        <div style={{display:'flex',flexWrap:'wrap',gap:'6px'}}>
+          <span style={{fontSize:'8px',fontFamily:'monospace',color:'#9ca3af',alignSelf:'center',fontWeight:'600'}}>Vehicles:</span>
+          {vehDefs.map(({key,label,color})=>(
+            <button key={key} onClick={()=>toggleVehicle(key)} style={{
+              padding:'3px 10px',borderRadius:'14px',fontSize:'9px',fontFamily:'monospace',fontWeight:'600',
+              cursor:'pointer',border:`1.5px solid ${hiddenVehicles[key]?'#e5e7eb':color}`,
+              background:hiddenVehicles[key]?'#fafafa':color+'22',color:hiddenVehicles[key]?'#9ca3af':color,
+              textDecoration:hiddenVehicles[key]?'line-through':'none'}}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
-      <div ref={divRef} style={{width:'100%',height:'255px'}}/>
+      <div ref={divRef} style={{width:'100%',height:'320px'}}/>
     </div>
   );
 }
