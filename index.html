@@ -9,6 +9,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.26.0/plotly.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet"/>
@@ -834,9 +836,9 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
       ${TD(f(0.200*ap.span,2))}${TD('q_V×L/2='+f(ap.V_wind_lat,3))}${TD(f(ap.M_wind,2),{bold:true})}
     </tr>
     <tr style="background:#f9fafb">
-      ${TD('Rocking',{align:'left'})}${TD('§1.3.6')}
-      ${TD('0.20×P×gauge_ft×d_max/Ix = 0.20×'+ap.axle+'×'+f(ap.gauge_ft,3)+'×'+f(ap.d_max,2)+'/'+f(ap.Ix_grp,2),{align:'left'})}
-      ${TD('—')}${TD('R_rock='+f(ap.R_rock,3))}${TD(f(ap.M_rock,2),{bold:true})}
+      ${TD('Rocking (impact addition)',{align:'left'})}${TD('§1.3.6')}
+      ${TD('I_rock = 0.20×gauge_ft×d_max/Ix = 0.20×'+f(ap.gauge_ft,3)+'×'+f(ap.d_max,2)+'/'+f(ap.Ix_grp,2)+' = '+f(ap.I_rock,4)+' (added to impact factor)',{align:'left'})}
+      ${TD('—')}${TD('factor (no force)')}${TD('— added to (1+I)',{bold:true})}
     </tr>
     ${ap.curveDegree>0?`<tr>
       ${TD('Centrifugal Force',{align:'left'})}${TD('§1.3.6')}
@@ -1489,6 +1491,22 @@ function BridgeSchematic({spans, elemsPerSpan, sectionZones}) {
       </text>
     </svg>
   );
+}
+
+// ── LaTeX rendering via KaTeX ────────────────────────────────────────────────
+// <Tex>{'\\frac{a}{b}'}</Tex> inline · <Tex block>{...}</Tex> centered display
+function Tex({children, block=false, style={}}) {
+  const ref = React.useRef(null);
+  React.useEffect(()=>{
+    if (ref.current && window.katex) {
+      try {
+        window.katex.render(String(children), ref.current, {
+          throwOnError:false, displayMode:block, output:'html',
+        });
+      } catch(e) { if(ref.current) ref.current.textContent = String(children); }
+    }
+  }, [children, block]);
+  return <span ref={ref} style={{...(block?{display:'block',textAlign:'center',margin:'4px 0'}:{}),...style}}/>;
 }
 
 const INP={background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',color:'#1a2133',
@@ -10685,6 +10703,44 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     No <strong>AREMA Built-Up</strong> cap zone — go to Capacity Zones → AREMA Built-Up.
                   </div>
                 )}
+                {/* ── User Defined Rating Location (TOP) ── */}
+                {aremaAsdData.length>0&&(()=>{
+                  const xVal = aremaCalcX==='' ? null : parseFloat(aremaCalcX);
+                  const selRow = xVal!=null
+                    ? aremaAsdData.reduce((best,r)=>Math.abs(r.pos-xVal)<Math.abs(best.pos-xVal)?r:best, aremaAsdData[0])
+                    : govAsdN;
+                  const isInterpPos = xVal!=null && !aremaAsdData.find(r=>Math.abs(r.pos-xVal)<0.005);
+                  return (
+                  <div style={{background:'#eff6ff',border:'2px solid #93c5fd',borderRadius:'8px',
+                    padding:'10px 16px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
+                    <div style={{fontSize:'10px',fontFamily:'monospace',fontWeight:'700',color:'#1d4ed8',whiteSpace:'nowrap'}}>
+                      📍 User Defined Rating Location
+                    </div>
+                    <input type="number" value={aremaCalcX} step="0.25" min="0"
+                      placeholder={`governing @ ${govAsdN?.pos.toFixed(2)||'?'} ft`}
+                      style={{padding:'5px 10px',border:'2px solid #93c5fd',borderRadius:'5px',
+                        fontFamily:'monospace',fontSize:'12px',fontWeight:'600',
+                        background:'#fff',width:'160px',color:'#1d4ed8'}}
+                      onChange={e=>{setAremaCalcX(e.target.value);setRating('arema_userPos',e.target.value);}}/>
+                    {aremaCalcX!==''&&<button onClick={()=>{setAremaCalcX('');setRating('arema_userPos','');}}
+                      style={{padding:'4px 10px',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:'4px',
+                        fontSize:'10px',cursor:'pointer',color:'#1d4ed8',fontFamily:'monospace'}}>
+                      ← Use governing
+                    </button>}
+                    {isInterpPos&&<span style={{fontSize:'9px',fontFamily:'monospace',color:'#7c3aed',
+                      background:'#f5f3ff',padding:'2px 6px',borderRadius:'3px',border:'1px solid #ddd6fe'}}>
+                      📐 interpolated — enter any position 0–{aremaAsdData[aremaAsdData.length-1]?.pos.toFixed(1)} ft
+                    </span>}
+                    {!isInterpPos&&selRow&&<div style={{fontSize:'10px',fontFamily:'monospace',color:'#374151'}}>
+                      Showing calc at&nbsp;
+                      <strong style={{color:'#1d4ed8'}}>N{selRow.node} @ {selRow.pos.toFixed(2)} ft</strong>
+                      {aremaCalcX===''&&<span style={{color:'#d97706',marginLeft:'6px'}}>[governing — min RF_N = {selRow.gN?.toFixed(3)}]</span>}
+                    </div>}
+                    <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
+                      Any position OK — linearly interpolated between adjacent nodes
+                    </div>
+                  </div>);
+                })()}
                 {/* LC selectors */}
                 <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'12px 16px',marginBottom:'10px'}}>
                   <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>
@@ -10901,20 +10957,6 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <input type="checkbox" checked={showMod} onChange={e=>setRating('arema_mod',e.target.checked)} style={{accentColor:'#d97706'}}/>
                         Show Modified
                       </label>
-                      {/* Rating check toggles for envelope */}
-                      <div style={{gridColumn:'1/-1',padding:'8px 10px',background:'#fafafa',border:'1px solid #e5e7eb',borderRadius:'4px',marginTop:'4px'}}>
-                        <div style={{fontSize:'9px',fontWeight:'600',color:'#374151',marginBottom:'6px'}}>Envelope Display:</div>
-                        <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:'4px'}}>
-                          {[['Normal','arema_show_normal'],['Maximum','arema_show_maximum'],
-                            ['Modified','arema_show_modified'],['Shear','arema_show_shear'],
-                            ['Fatigue','arema_show_fatigue']].map(([lbl,key])=>(
-                            <label key={key} style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',fontSize:'10px',fontFamily:'monospace',color:'#6b7280'}}>
-                              <input type="checkbox" checked={R2[key]!==false} onChange={e=>setRating(key,e.target.checked)} style={{accentColor:'#6366f1'}}/>
-                              {lbl}
-                            </label>
-                          ))}
-                        </div>
-                      </div>
                     </div>
 
                   </div>
@@ -11000,45 +11042,6 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     </div>
                   </div>
                   );
-                })()}
-
-                {/* ── Calc-sheet location selector ── */}
-                {aremaAsdData.length>0&&(()=>{
-                  const xVal = aremaCalcX==='' ? null : parseFloat(aremaCalcX);
-                  const selRow = xVal!=null
-                    ? aremaAsdData.reduce((best,r)=>Math.abs(r.pos-xVal)<Math.abs(best.pos-xVal)?r:best, aremaAsdData[0])
-                    : govAsdN;
-                  const isInterpPos = xVal!=null && !aremaAsdData.find(r=>Math.abs(r.pos-xVal)<0.005);
-                  return (
-                  <div style={{background:'#eff6ff',border:'2px solid #93c5fd',borderRadius:'8px',
-                    padding:'10px 16px',marginBottom:'10px',display:'flex',alignItems:'center',gap:'12px',flexWrap:'wrap'}}>
-                    <div style={{fontSize:'10px',fontFamily:'monospace',fontWeight:'700',color:'#1d4ed8',whiteSpace:'nowrap'}}>
-                      📍 User Defined Rating Location
-                    </div>
-                    <input type="number" value={aremaCalcX} step="0.25" min="0"
-                      placeholder={`governing @ ${govAsdN?.pos.toFixed(2)||'?'} ft`}
-                      style={{padding:'5px 10px',border:'2px solid #93c5fd',borderRadius:'5px',
-                        fontFamily:'monospace',fontSize:'12px',fontWeight:'600',
-                        background:'#fff',width:'160px',color:'#1d4ed8'}}
-                      onChange={e=>{setAremaCalcX(e.target.value);setRating('arema_userPos',e.target.value);}}/>
-                    {aremaCalcX!==''&&<button onClick={()=>{setAremaCalcX('');setRating('arema_userPos','');}}
-                      style={{padding:'4px 10px',background:'#dbeafe',border:'1px solid #93c5fd',borderRadius:'4px',
-                        fontSize:'10px',cursor:'pointer',color:'#1d4ed8',fontFamily:'monospace'}}>
-                      ← Use governing
-                    </button>}
-                    {isInterpPos&&<span style={{fontSize:'9px',fontFamily:'monospace',color:'#7c3aed',
-                      background:'#f5f3ff',padding:'2px 6px',borderRadius:'3px',border:'1px solid #ddd6fe'}}>
-                      📐 interpolated — enter any position 0–{aremaAsdData[aremaAsdData.length-1]?.pos.toFixed(1)} ft
-                    </span>}
-                    {!isInterpPos&&selRow&&<div style={{fontSize:'10px',fontFamily:'monospace',color:'#374151'}}>
-                      Showing calc at&nbsp;
-                      <strong style={{color:'#1d4ed8'}}>N{selRow.node} @ {selRow.pos.toFixed(2)} ft</strong>
-                      {aremaCalcX===''&&<span style={{color:'#d97706',marginLeft:'6px'}}>[governing — min RF_N = {selRow.gN?.toFixed(3)}]</span>}
-                    </div>}
-                    <div style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
-                      Any position OK — linearly interpolated between adjacent nodes
-                    </div>
-                  </div>);
                 })()}
 
                 {/* Modified effects */}
@@ -11592,62 +11595,96 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const DF_base = 1 / n_gird;
                   const DF = DF_base + e_track * d_max / Ix_grp;
                   
+                  // Local impact recompute for self-contained display
+                  const spanL = _aremaParams.span;
+                  const iAuto_p = spanL<80 ? (40-3*spanL*spanL/1600)/100 : (16+600/(spanL-30))/100;
+                  const iBase_p = _aremaParams.impAuto ? iAuto_p : _aremaParams.impMan;
+                  const ballastF_p = _aremaParams.ballastF;
+                  const f1pI_p = 1 + ballastF_p*(iBase_p + I_rock);
+
+                  const box = (border)=>({background:'#fff',border:`1px solid ${border}`,borderRadius:'6px',padding:'11px 13px',marginBottom:'10px'});
+                  const hd  = (c)=>({fontWeight:'700',color:c,marginBottom:'7px',fontSize:'11px'});
+                  const eq  = {margin:'7px 0',fontSize:'13px'};
+                  const note= {marginBottom:'5px',color:'#475569',fontSize:'10px'};
                   return (
                     <div style={{background:'#f0f9ff',border:'1px solid #0369a1',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px'}}>
                       <div style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginBottom:showRocking?'12px':'0'}}
                         onClick={()=>setShowRocking(!showRocking)}>
-                        <span style={{fontSize:'11px',fontWeight:'600',color:'#0369a1'}}>📐 Rocking, Centrifugal Force & Load Distribution Details</span>
-                        <span style={{fontSize:'10px',color:'#0369a1'}}>({showRocking?'▼':'▶'})</span>
+                        <span style={{fontSize:'12px',fontWeight:'700',color:'#0369a1'}}>📐 Live Load Factors — Distribution, Impact (incl. Rocking) & Centrifugal Force</span>
+                        <span style={{fontSize:'10px',color:'#0369a1'}}>({showRocking?'▼ hide':'▶ show'})</span>
                       </div>
-                      
+
                       {showRocking&&(
-                      <div style={{fontSize:'10px',fontFamily:'monospace',lineHeight:'1.6',color:'#1e293b'}}>
-                        {/* Girder Group Geometry */}
-                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
-                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Girder Group Geometry</div>
-                          <div>
-                            <div style={{marginBottom:'6px'}}>n<sub>gird</sub> = {n_gird} girders</div>
-                            <div style={{marginBottom:'6px'}}>Spacings: [{spacings.map(s=>s.toFixed(2)).join(', ')}] ft</div>
-                            <div style={{marginBottom:'6px'}}>Positions: [{gPos.map(p=>p.toFixed(2)).join(', ')}] ft</div>
-                            <div style={{marginBottom:'6px'}}>Group center: {gCent.toFixed(3)} ft</div>
-                            <div style={{marginBottom:'6px'}}>Eccentricities: [{gd.map(d=>d.toFixed(3)).join(', ')}] ft</div>
-                            <div style={{marginBottom:'6px',fontWeight:'600'}}>I<sub>x</sub> = Σd² = {Ix_grp.toFixed(3)} ft²</div>
-                            <div style={{fontWeight:'600'}}>d<sub>max</sub> = {d_max.toFixed(3)} ft (governing girder)</div>
+                      <div style={{fontSize:'10.5px',lineHeight:'1.55',color:'#1e293b'}}>
+
+                        {/* ── 1. Girder Group Geometry ── */}
+                        <div style={box('#0369a1')}>
+                          <div style={hd('#0369a1')}>① Girder Group Geometry — Rigid Body Rotation Basis</div>
+                          <div style={note}>The transverse load distribution and the rocking/CF overturning effects all rely on the girder group's moment of inertia about its centroid.</div>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 16px',fontFamily:'monospace',fontSize:'10px'}}>
+                            <div>n<sub>gird</sub> = {n_gird} girders</div>
+                            <div>Group center: x̄ = {gCent.toFixed(3)} ft</div>
+                            <div>Spacings: [{spacings.map(s=>s.toFixed(2)).join(', ')}] ft</div>
+                            <div>Positions: [{gPos.map(p=>p.toFixed(2)).join(', ')}] ft</div>
+                          </div>
+                          <div style={{marginTop:'6px'}}>Eccentricities from centroid: d<sub>i</sub> = [{gd.map(d=>d.toFixed(3)).join(', ')}] ft</div>
+                          <Tex block>{`I_x = \\sum d_i^2 = ${gd.map(d=>d.toFixed(2)+'^2').join(' + ')} = ${Ix_grp.toFixed(3)}\\ \\text{ft}^2`}</Tex>
+                          <Tex block>{`d_{max} = ${d_max.toFixed(3)}\\ \\text{ft}\\quad(\\text{governing girder})`}</Tex>
+                        </div>
+
+                        {/* ── 2. Distribution Factor ── */}
+                        <div style={box('#0369a1')}>
+                          <div style={hd('#0369a1')}>② Distribution Factor (DF) — Fraction of Live Load to Governing Girder</div>
+                          <div style={note}>Lever-rule / rigid-rotation distribution. With the track centered (e<sub>track</sub> = 0) the load splits equally among girders.</div>
+                          <Tex block>{`DF = \\frac{1}{n_{gird}} + \\frac{e_{track}\\cdot d_{max}}{I_x}`}</Tex>
+                          <Tex block>{`DF = \\frac{1}{${n_gird}} + \\frac{${e_track.toFixed(2)}\\times ${d_max.toFixed(3)}}{${Ix_grp.toFixed(3)}} = ${DF_base.toFixed(4)} + ${(e_track*d_max/Ix_grp).toFixed(5)}`}</Tex>
+                          <div style={{textAlign:'center',fontWeight:'700',color:'#0369a1',fontSize:'12px',marginTop:'4px'}}>
+                            <Tex>{`\\boxed{DF = ${DF.toFixed(4)}}`}</Tex>
                           </div>
                         </div>
-                        
-                        {/* Rocking Impact */}
-                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
-                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Rocking Impact (AREMA §1.3.6)</div>
-                          <div style={{marginBottom:'6px'}}>Equation: I<sub>rock</sub> = 0.20 × gauge<sub>ft</sub> × d<sub>max</sub> / I<sub>x</sub></div>
-                          <div style={{marginBottom:'6px'}}>gauge = {gauge.toFixed(4)} ft (standard: 56.5 in / 12)</div>
-                          <div style={{marginBottom:'6px'}}>d<sub>max</sub> = {d_max.toFixed(3)} ft · I<sub>x</sub> = {Ix_grp.toFixed(3)} ft²</div>
-                          <div style={{marginBottom:'6px'}}>I<sub>rock</sub> = 0.20 × {gauge.toFixed(4)} × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)}</div>
-                          <div style={{fontWeight:'600',color:'#0369a1'}}>I<sub>rock</sub> = {(I_rock*100).toFixed(3)}% (added to impact factor)</div>
+
+                        {/* ── 3. Impact (incl. Rocking) ── */}
+                        <div style={box('#0369a1')}>
+                          <div style={hd('#0369a1')}>③ Impact Factor (1 + I) — Includes Rocking (AREMA §1.3.5 & §1.3.6)</div>
+                          <div style={note}>Rocking is not a separate load — it is an <b>addition to the impact factor</b>. The two are combined and (optionally) scaled by the ballast-deck factor.</div>
+                          <div style={{fontWeight:'600',marginTop:'4px',marginBottom:'2px'}}>Base impact (rolling effect), span L = {spanL.toFixed(2)} ft:</div>
+                          {spanL<80
+                            ? <Tex block>{`I = \\frac{40 - 3L^2/1600}{100} = \\frac{40 - 3(${spanL.toFixed(1)})^2/1600}{100} = ${(iAuto_p*100).toFixed(3)}\\%`}</Tex>
+                            : <Tex block>{`I = \\frac{16 + 600/(L-30)}{100} = \\frac{16 + 600/(${spanL.toFixed(1)}-30)}{100} = ${(iAuto_p*100).toFixed(3)}\\%`}</Tex>}
+                          {!_aremaParams.impAuto&&<div style={{color:'#c2410c',marginBottom:'4px'}}>Manual override: I<sub>base</sub> = {(iBase_p*100).toFixed(2)}%</div>}
+                          <div style={{fontWeight:'600',marginTop:'6px',marginBottom:'2px'}}>Rocking addition (overturning of girder group):</div>
+                          <Tex block>{`I_{rock} = \\frac{0.20\\cdot gauge \\cdot d_{max}}{I_x} = \\frac{0.20\\times ${gauge.toFixed(3)}\\times ${d_max.toFixed(3)}}{${Ix_grp.toFixed(3)}} = ${(I_rock*100).toFixed(3)}\\%`}</Tex>
+                          <div style={{fontWeight:'600',marginTop:'6px',marginBottom:'2px'}}>Combined total impact{ballastF_p!==1?` (× ${ballastF_p} ballast-deck factor)`:''}:</div>
+                          <Tex block>{`1 + I = 1 + ${ballastF_p!==1?ballastF_p+'\\times':''}(I_{base} + I_{rock}) = 1 + ${ballastF_p!==1?ballastF_p+'\\times':''}(${(iBase_p).toFixed(4)} + ${I_rock.toFixed(4)})`}</Tex>
+                          <div style={{textAlign:'center',fontWeight:'700',color:'#0369a1',fontSize:'12px',marginTop:'4px'}}>
+                            <Tex>{`\\boxed{1 + I = ${f1pI_p.toFixed(4)}}`}</Tex>
+                          </div>
                         </div>
-                        
-                        {/* Centrifugal Force */}
-                        <div style={{background:'#fff',border:'1px solid #c2410c',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
-                          <div style={{fontWeight:'600',color:'#c2410c',marginBottom:'8px'}}>Centrifugal Force (AREMA §1.3.6){cfDegree===0&&<span style={{fontWeight:'400',color:'#9ca3af'}}> — straight track</span>}</div>
-                          <div style={{marginBottom:'6px'}}>Lateral force applied 8 ft above top of rail → overturning moment, distributed by rigid body rotation</div>
-                          <div style={{marginBottom:'6px'}}>Equation: C = 0.00117 × S² × D (centrifugal factor, %)</div>
-                          <div style={{marginBottom:'6px'}}>S = {cfSpeed} mph (design speed) · D = {cfDegree}° (degree of curve)</div>
+
+                        {/* ── 4. Centrifugal Force ── */}
+                        <div style={box('#c2410c')}>
+                          <div style={hd('#c2410c')}>④ Centrifugal Force (CF) — AREMA §1.3.6{cfDegree===0&&<span style={{fontWeight:'400',color:'#9ca3af'}}> — straight track, not applicable</span>}</div>
+                          <div style={note}>On curves, a lateral force = C% of each axle acts <b>8 ft above top of rail</b>. The resulting overturning moment distributes to the girders by the same rigid-rotation relation, producing a live-load multiplier applied to <b>all</b> rating cases (like impact).</div>
+                          <Tex block>{`C = 0.00117\\,S^2 D \\qquad (S=\\text{speed mph},\\ D=\\text{degree of curve})`}</Tex>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'4px 16px',fontFamily:'monospace',fontSize:'10px',marginBottom:'4px'}}>
+                            <div>S = {cfSpeed} mph (design speed)</div>
+                            <div>D = {cfDegree}° (degree of curve)</div>
+                          </div>
                           {cfDegree>0?<>
-                            <div style={{marginBottom:'6px'}}>C = 0.00117 × {cfSpeed}² × {cfDegree} = {C_cf.toFixed(4)}%</div>
-                            <div style={{marginBottom:'6px'}}>Equation: CF<sub>factor</sub> = C × 8 × d<sub>max</sub> / I<sub>x</sub></div>
-                            <div style={{marginBottom:'6px'}}>CF<sub>factor</sub> = {C_cf.toFixed(4)} × 8 × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)}</div>
-                            <div style={{fontWeight:'600',color:'#c2410c'}}>CF<sub>factor</sub> = {CF_fac.toFixed(4)} → live load × {(1+CF_fac).toFixed(4)} (all cases, like impact)</div>
-                          </>:<div style={{fontWeight:'600',color:'#9ca3af'}}>CF<sub>factor</sub> = 0 (D = 0, no curvature)</div>}
+                            <Tex block>{`C = 0.00117\\times ${cfSpeed}^2 \\times ${cfDegree} = ${C_cf.toFixed(4)}\\%`}</Tex>
+                            <Tex block>{`CF_{factor} = \\frac{C \\cdot (8\\,\\text{ft}) \\cdot d_{max}}{I_x} = \\frac{${C_cf.toFixed(4)}\\times 8\\times ${d_max.toFixed(3)}}{${Ix_grp.toFixed(3)}}`}</Tex>
+                            <div style={{textAlign:'center',fontWeight:'700',color:'#c2410c',fontSize:'12px',marginTop:'4px'}}>
+                              <Tex>{`\\boxed{CF_{factor} = ${CF_fac.toFixed(4)}\\ \\Rightarrow\\ LL\\times ${(1+CF_fac).toFixed(4)}}`}</Tex>
+                            </div>
+                          </>:<div style={{textAlign:'center',fontWeight:'700',color:'#9ca3af',marginTop:'4px'}}>
+                            <Tex>{`CF_{factor} = 0\\quad(D = 0)`}</Tex>
+                          </div>}
                         </div>
-                        
-                        {/* Load Distribution */}
-                        <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px'}}>
-                          <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Load Distribution Factor (Lever Rule)</div>
-                          <div style={{marginBottom:'6px'}}>Equation: DF = 1/n + e<sub>track</sub> × d<sub>max</sub> / I<sub>x</sub></div>
-                          <div style={{marginBottom:'6px'}}>DF<sub>base</sub> = 1/{n_gird} = {DF_base.toFixed(4)}</div>
-                          <div style={{marginBottom:'6px'}}>e<sub>track</sub> = {e_track.toFixed(2)} ft (track centered)</div>
-                          <div style={{marginBottom:'6px'}}>Moment term = {e_track} × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)} = {(e_track * d_max / Ix_grp).toFixed(6)}</div>
-                          <div style={{fontWeight:'600',color:'#0369a1'}}>DF = {DF.toFixed(4)} (fraction of load on governing girder)</div>
+
+                        {/* ── Combined LL multiplier summary ── */}
+                        <div style={{background:'#0369a1',color:'#e0f2fe',borderRadius:'6px',padding:'10px 13px',fontSize:'11px'}}>
+                          <div style={{fontWeight:'700',marginBottom:'5px'}}>⇒ Net Live-Load Effect on Governing Girder</div>
+                          <Tex block style={{color:'#fff'}}>{`M_{LL,gov} = M_{LL}\\times \\underbrace{(1+I)}_{${f1pI_p.toFixed(3)}}\\times \\underbrace{DF}_{${DF.toFixed(3)}}\\times \\underbrace{(1+CF)}_{${(1+CF_fac).toFixed(3)}} = M_{LL}\\times ${(f1pI_p*DF*(1+CF_fac)).toFixed(4)}`}</Tex>
                         </div>
                       </div>
                       )}
@@ -11771,7 +11808,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       rfcM:lp(lo.rfcM,hi.rfcM), rftM:lp(lo.rftM,hi.rftM), rfvM:lp(lo.rfvM,hi.rfvM),
                       gN:lp(lo.gN,hi.gN), gX:lp(lo.gX,hi.gX), gM:lp(lo.gM,hi.gM),
                       rfFat:lp(lo.rfFat,hi.rfFat),
-                      dV_N:lp(lo.dV_N,hi.dV_N), dV_mod:lp(lo.dV_mod,hi.dV_mod)};
+                      dV_N:lp(lo.dV_N,hi.dV_N), dV_mod:lp(lo.dV_mod,hi.dV_mod),
+                      // Live-load moment data (per-vehicle), needed for the new LL columns at interpolated x
+                      dM:lp(lo.dM,hi.dM), denomN:lp(lo.denomN,hi.denomN), denomMod:lp(lo.denomMod,hi.denomMod),
+                      dM_fat:lp(lo.dM_fat,hi.dM_fat), MLL:lp(lo.MLL,hi.MLL), VLL:lp(lo.VLL,hi.VLL)};
                   };
                   const tableVehicles = aremaMultiData.filter(v=>!isLong(v));
                   // Per-vehicle governing node index (by table type)
@@ -12161,10 +12201,21 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                 {aremaAsdData.length>1&&(
                   <div style={{marginBottom:'12px',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
                     <div style={{padding:'7px 14px',background:'#f8fafc',borderBottom:'1px solid #e5e7eb',
-                      display:'flex',alignItems:'center',gap:'8px'}}>
+                      display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
                       <span style={{fontSize:'11px',fontWeight:'700',color:'#374151',fontFamily:'monospace'}}>
                         📈 RF Envelope
                       </span>
+                      <span style={{fontSize:'9px',fontWeight:'600',color:'#6b7280',fontFamily:'monospace'}}>Display:</span>
+                      <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+                        {[['Normal','arema_show_normal'],['Maximum','arema_show_maximum'],
+                          ['Modified','arema_show_modified'],['Shear','arema_show_shear'],
+                          ['Fatigue','arema_show_fatigue']].map(([lbl,key])=>(
+                          <label key={key} style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',fontSize:'10px',fontFamily:'monospace',color:'#6b7280'}}>
+                            <input type="checkbox" checked={R2[key]!==false} onChange={e=>setRating(key,e.target.checked)} style={{accentColor:'#6366f1'}}/>
+                            {lbl}
+                          </label>
+                        ))}
+                      </div>
                       <span style={{fontSize:'8.5px',fontFamily:'monospace',color:'#9ca3af',marginLeft:'auto'}}>
                         Hover for details · Scroll to zoom · Drag to pan
                       </span>
@@ -12206,11 +12257,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const dM = p.dM, dV = p.dV;
                   const fmt = (v,d=2)=>v!=null&&isFinite(v)?v.toFixed(d):'—';
                   const rfCol = rf=>rf>=1?'#059669':rf>=0.5?'#d97706':'#dc2626';
-                  const Row = ({label,formula,value,note,bold,color,bg}) => (
-                    <div style={{display:'grid',gridTemplateColumns:'220px 1fr 120px',gap:'0',
-                      borderBottom:'1px solid #f3f4f6',background:bg||'transparent',padding:'3px 8px',alignItems:'center'}}>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#6b7280',fontWeight:bold?'700':'400'}}>{label}</div>
-                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#374151'}}>{formula}</div>
+                  const Row = ({label,formula,value,note,bold,color,bg,tex,texF}) => (
+                    <div style={{display:'grid',gridTemplateColumns:'250px 1fr 130px',gap:'0',
+                      borderBottom:'1px solid #f3f4f6',background:bg||'transparent',padding:'4px 8px',alignItems:'center'}}>
+                      <div style={{fontSize:tex?'11px':'9px',fontFamily:tex?'inherit':'monospace',color:'#6b7280',fontWeight:bold?'700':'400'}}>
+                        {tex ? <Tex>{tex}</Tex> : label}
+                      </div>
+                      <div style={{fontSize:texF?'11px':'9px',fontFamily:texF?'inherit':'monospace',color:'#374151'}}>
+                        {texF ? <Tex>{texF}</Tex> : formula}
+                      </div>
                       <div style={{fontSize:'9.5px',fontFamily:'monospace',fontWeight:'700',textAlign:'right',color:color||'#374151'}}>{value}{note&&<span style={{fontSize:'8px',color:'#9ca3af',marginLeft:'4px'}}>{note}</span>}</div>
                     </div>
                   );
@@ -12253,48 +12308,48 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                     {/* Allowable Stresses — Normal */}
                     <Hdr color="#15803d" bg="#f0fdf4">ALLOWABLE STRESSES — NORMAL (AREMA Table 15-1-11)</Hdr>
-                    <Row label="Tension Ft_N = 0.55 × Fy"
-                         formula={`0.55 × ${allo.Fy} ksi`}
+                    <Row tex={`F_{t,N} = 0.55\\,F_y`}
+                         texF={`0.55 \\times ${allo.Fy} = ${fmt(allo.Ft_N)}\\ \\text{ksi}`}
                          value={`${fmt(allo.Ft_N)} ksi`} color="#15803d"/>
-                    <Row label="Compression Fb_N (with LTB)"
-                         formula={`0.55Fy − (0.55×${allo.Fy}²/1.8×10⁶)×(${fmt(allo.LRyc)})² = ${fmt(allo.Ft_N)} − ${fmt(allo.Fb_N_ltb,4)}`}
+                    <Row tex={`F_{b,N} = 0.55F_y - \\frac{0.55F_y^2}{1.8\\times10^6}\\left(\\frac{L}{r_{yc}}\\right)^2`}
+                         texF={`${fmt(allo.Ft_N)} - ${fmt(allo.Fb_N_ltb,4)}\\ \\ (L/r_{yc}=${fmt(allo.LRyc)})`}
                          value={`${fmt(allo.Fb_N)} ksi`} color="#15803d"
                          note={allo.Fb_N<allo.Ft_N-0.01?'LTB governs':'=0.55Fy'}/>
-                    <Row label="Shear Fs_N = 0.35 × Fy"
-                         formula={`0.35 × ${allo.Fy} ksi`}
+                    <Row tex={`F_{s,N} = 0.35\\,F_y`}
+                         texF={`0.35 \\times ${allo.Fy} = ${fmt(allo.Fs_N)}\\ \\text{ksi}`}
                          value={`${fmt(allo.Fs_N)} ksi`} color="#15803d"/>
 
                     {/* Capacities — Normal */}
                     <Hdr color="#15803d" bg="#f0fdf4">MOMENT &amp; SHEAR CAPACITY — NORMAL</Hdr>
-                    <Row label="Compression: Mc_N = Fb_N × Sx_top / 12"
-                         formula={`${fmt(allo.Fb_N)} × ${sec.SxTopG.toFixed(2)} / 12`}
+                    <Row tex={`M_{c,N} = \\frac{F_{b,N}\\, S_{x,top}}{12}`}
+                         texF={`\\frac{${fmt(allo.Fb_N)} \\times ${sec.SxTopG.toFixed(2)}}{12}`}
                          value={`${fmt(p.McN)} ft-kips`} bg="#f0fdf4" bold/>
-                    <Row label="Tension: Mt_N = Ft_N × Sx_bot_net / 12"
-                         formula={`${fmt(allo.Ft_N)} × ${sec.SxBotN.toFixed(2)} / 12`}
+                    <Row tex={`M_{t,N} = \\frac{F_{t,N}\\, S_{x,bot,net}}{12}`}
+                         texF={`\\frac{${fmt(allo.Ft_N)} \\times ${sec.SxBotN.toFixed(2)}}{12}`}
                          value={`${fmt(p.MtN)} ft-kips`} bg="#f0fdf4" bold/>
-                    <Row label="Shear: Vn_N = Fs_N × Aw"
-                         formula={`${fmt(allo.Fs_N)} × ${sec.Aw.toFixed(3)}`}
+                    <Row tex={`V_{n,N} = F_{s,N}\\, A_w`}
+                         texF={`${fmt(allo.Fs_N)} \\times ${sec.Aw.toFixed(3)}`}
                          value={`${fmt(p.VnN)} kips`} bg="#f0fdf4" bold/>
 
                     {/* Applied Loads */}
                     <Hdr color="#374151" bg="#f3f4f6">APPLIED LOADS</Hdr>
-                    <Row label="Dead Load moment MDL"
+                    <Row tex={`M_{DL}`}
                          formula={`from ${aremaDcLC||'DC'} load case`}
                          value={`${fmt(p.MDL)} ft-kips`}/>
-                    <Row label="Dead Load shear VDL"
+                    <Row tex={`V_{DL}`}
                          formula={`from ${aremaDcLC||'DC'} load case`}
                          value={`${fmt(p.VDL)} kips`}/>
-                    <Row label="Live Load moment MLL"
-                         formula={`from ${aremaLlLC||'LL'} (unfactored)`}
+                    <Row tex={`M_{LL}\\ (\\text{unfactored})`}
+                         formula={`from ${aremaLlLC||'LL'}`}
                          value={`${fmt(p.MLL)} ft-kips`}/>
-                    <Row label="Impact factor I"
-                         formula={span<80?`(40−3×${span}²/1600)/100`:`(16+600/(${span}−30))/100`}
-                         value={`${((f1pI-1)*100).toFixed(1)}%  →  (1+I) = ${fmt(f1pI,3)}`}/>
-                    <Row label="Distribution factor DF"
-                         formula="user-entered"
+                    <Row tex={`1 + I`}
+                         texF={span<80?`1+\\frac{40-3(${span})^2/1600}{100}`:`1+\\frac{16+600/(${span}-30)}{100}`}
+                         value={`${fmt(f1pI,3)}`} note="incl. rocking"/>
+                    <Row tex={`DF`}
+                         formula="distribution to governing girder"
                          value={`${DF}`}/>
-                    <Row label="Factored LL: dM = MLL × (1+I) × DF × (1+CF)"
-                         formula={`${fmt(p.MLL)} × ${fmt(f1pI,3)} × ${DF} × ${fmt(1+(CF_factor||0),4)}`}
+                    <Row tex={`dM = M_{LL}(1+I)\\,DF\\,(1+CF)`}
+                         texF={`${fmt(p.MLL)} \\times ${fmt(f1pI,3)} \\times ${DF} \\times ${fmt(1+(CF_factor||0),4)}`}
                          value={`${fmt(dM)} ft-kips`} bold bg="#f9fafb"/>
                     <Row label={`Denom_N = dM (LL+I+CF)`}
                          formula="LL × (1+I) × DF × (1+CF) — Normal & Maximum denominator"
@@ -12302,23 +12357,23 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                     {/* Rating — Normal */}
                     <Hdr color="#15803d" bg="#dcfce7">RATING FACTORS — NORMAL (DL + LL+I only)</Hdr>
-                    <Row label="RF_comp = (Mc_N − MDL) / denomN"
-                         formula={`(${fmt(p.McN)} − ${fmt(p.MDL)}) / ${fmt(p.denomN)}`}
+                    <Row tex={`RF_{comp} = \\frac{M_{c,N} - M_{DL}}{denom_N}`}
+                         texF={`\\frac{${fmt(p.McN)} - ${fmt(p.MDL)}}{${fmt(p.denomN)}}`}
                          value={`${fmt(p.rfcN,3)}`}
                          color={rfCol(p.rfcN)} bg={p.govN==='Comp'?'#dcfce7':undefined}
                          note={p.govN==='Comp'?'← governs':''}/>
-                    <Row label="RF_tens = (Mt_N − MDL) / denomN"
-                         formula={`(${fmt(p.MtN)} − ${fmt(p.MDL)}) / ${fmt(p.denomN)}`}
+                    <Row tex={`RF_{tens} = \\frac{M_{t,N} - M_{DL}}{denom_N}`}
+                         texF={`\\frac{${fmt(p.MtN)} - ${fmt(p.MDL)}}{${fmt(p.denomN)}}`}
                          value={`${fmt(p.rftN,3)}`}
                          color={rfCol(p.rftN)} bg={p.govN==='Tens'?'#dcfce7':undefined}
                          note={p.govN==='Tens'?'← governs':''}/>
-                    {p.rfvN!=null&&<Row label="RF_shear = (Vn_N − VDL) / dV"
-                         formula={`(${fmt(p.VnN)} − ${fmt(p.VDL)}) / ${fmt(p.dV)}`}
+                    {p.rfvN!=null&&<Row tex={`RF_{shear} = \\frac{V_{n,N} - V_{DL}}{dV}`}
+                         texF={`\\frac{${fmt(p.VnN)} - ${fmt(p.VDL)}}{${fmt(p.dV)}}`}
                          value={`${fmt(p.rfvN,3)}`}
                          color={rfCol(p.rfvN)} bg={p.govN==='Shear'?'#dcfce7':undefined}
                          note={p.govN==='Shear'?'← governs':''}/>}
-                    <Row label="RF_N = min(RF_comp, RF_tens, RF_shear)"
-                         formula={`min(${fmt(p.rfcN,3)}, ${fmt(p.rftN,3)}, ${p.rfvN!=null?fmt(p.rfvN,3):'—'})`}
+                    <Row tex={`RF_N = \\min(RF_{comp}, RF_{tens}, RF_{shear})`}
+                         texF={`\\min(${fmt(p.rfcN,3)},\\ ${fmt(p.rftN,3)},\\ ${p.rfvN!=null?fmt(p.rfvN,3):'-'})`}
                          value={`${fmt(p.gN,3)}  [${p.govN}]`}
                          color={rfCol(p.gN)} bold bg="#dcfce7"/>
                     <div style={{padding:'3px 8px',fontSize:'8px',fontFamily:'monospace',color:'#9ca3af'}}>
@@ -12328,61 +12383,58 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {/* Rating — Modified */}
                     {showMod&&govAsdM&&(<>
                     <Hdr color="#92400e" bg="#fef3c7">ALLOWABLE STRESSES — MAXIMUM &amp; MODIFIED (AREMA Table 15-7-1 · K = {fmt(allo.K)} ksi = 0.80×{allo.Fy})</Hdr>
-                    <Row label="Tension Ft_X = K"
-                         formula={`0.80 × ${allo.Fy} ksi`}
+                    <Row tex={`F_{t,X} = K = 0.80\\,F_y`}
+                         texF={`0.80 \\times ${allo.Fy} = ${fmt(allo.Ft_X)}\\ \\text{ksi}`}
                          value={`${fmt(allo.Ft_X)} ksi`} color="#92400e"/>
-                    <Row label="Compression Fb_X = K − LTB"
-                         formula={`K − (K×${allo.Fy}/1.8×10⁶)×(${fmt(allo.LRyc)})² = ${fmt(allo.K)} − ${fmt(allo.Fb_X_ltb,4)}`}
+                    <Row tex={`F_{b,X} = K - \\frac{K F_y}{1.8\\times10^6}\\left(\\frac{L}{r_{yc}}\\right)^2`}
+                         texF={`${fmt(allo.K)} - ${fmt(allo.Fb_X_ltb,4)}\\ \\ (L/r_{yc}=${fmt(allo.LRyc)})`}
                          value={`${fmt(allo.Fb_X)} ksi`} color="#92400e"/>
-                    <Row label="Shear Fs_X = 0.75 × K"
-                         formula={`0.75 × ${fmt(allo.K)}`}
+                    <Row tex={`F_{s,X} = 0.75\\,K`}
+                         texF={`0.75 \\times ${fmt(allo.K)} = ${fmt(allo.Fs_X)}\\ \\text{ksi}`}
                          value={`${fmt(allo.Fs_X)} ksi`} color="#92400e"/>
-                    <Hdr color="#c2410c" bg="#fff7ed">RATING FACTORS — MAXIMUM (DL + LL+I, K-factor allowables, CF as separate distribution)</Hdr>
-                    <Row label="Denom_N = dM (no CF moment)"
-                         formula={`${fmt(dM)} (same as Normal — CF applied separately)`}
-                         value={`${fmt(p.denomN)} ft-kips`} bold bg="#fff7ed"/>
-                    <Row label="Mc_X = Fb_X × Sx_top / 12"
-                         formula={`${fmt(allo.Fb_X)} × ${sec.SxTopG.toFixed(2)} / 12`}
+                    <Hdr color="#c2410c" bg="#fff7ed">RATING FACTORS — MAXIMUM (DL + LL+I, K-factor allowables)</Hdr>
+                    <Row tex={`M_{c,X} = \\frac{F_{b,X}\\, S_{x,top}}{12}`}
+                         texF={`\\frac{${fmt(allo.Fb_X)} \\times ${sec.SxTopG.toFixed(2)}}{12}`}
                          value={`${fmt(p.McX)} ft-kips`} bg="#fff7ed"/>
-                    <Row label="Mt_X = Ft_X × Sx_bot_net / 12"
-                         formula={`${fmt(allo.Ft_X)} × ${sec.SxBotN.toFixed(2)} / 12`}
+                    <Row tex={`M_{t,X} = \\frac{F_{t,X}\\, S_{x,bot,net}}{12}`}
+                         texF={`\\frac{${fmt(allo.Ft_X)} \\times ${sec.SxBotN.toFixed(2)}}{12}`}
                          value={`${fmt(p.MtX)} ft-kips`} bg="#fff7ed"/>
-                    <Row label="RF_comp = (Mc_X − MDL) / denomN"
-                         formula={`(${fmt(p.McX)} − ${fmt(p.MDL)}) / ${fmt(p.denomN)}`}
+                    <Row tex={`RF_{comp} = \\frac{M_{c,X} - M_{DL}}{denom_N}`}
+                         texF={`\\frac{${fmt(p.McX)} - ${fmt(p.MDL)}}{${fmt(p.denomN)}}`}
                          value={`${fmt(p.rfcX,3)}`}
                          color={rfCol(p.rfcX)} bg={p.govX==='Comp'?'#fed7aa':undefined}
                          note={p.govX==='Comp'?'← governs':''}/>
-                    <Row label="RF_tens = (Mt_X − MDL) / denomN"
-                         formula={`(${fmt(p.MtX)} − ${fmt(p.MDL)}) / ${fmt(p.denomN)}`}
+                    <Row tex={`RF_{tens} = \\frac{M_{t,X} - M_{DL}}{denom_N}`}
+                         texF={`\\frac{${fmt(p.MtX)} - ${fmt(p.MDL)}}{${fmt(p.denomN)}}`}
                          value={`${fmt(p.rftX,3)}`}
                          color={rfCol(p.rftX)} bg={p.govX==='Tens'?'#fed7aa':undefined}
                          note={p.govX==='Tens'?'← governs':''}/>
-                    {p.rfvX!=null&&<Row label="RF_shear = (Vn_X − VDL) / dV"
-                         formula={`(${fmt(p.VnX)} − ${fmt(p.VDL)}) / ${fmt(p.dV)}`}
+                    {p.rfvX!=null&&<Row tex={`RF_{shear} = \\frac{V_{n,X} - V_{DL}}{dV}`}
+                         texF={`\\frac{${fmt(p.VnX)} - ${fmt(p.VDL)}}{${fmt(p.dV)}}`}
                          value={`${fmt(p.rfvX,3)}`}
                          color={rfCol(p.rfvX)} bg={p.govX==='Shear'?'#fed7aa':undefined}
                          note={p.govX==='Shear'?'← governs':''}/>}
-                    <Row label="RF_X = min(RF_comp, RF_tens, RF_shear)"
-                         formula={`min(${fmt(p.rfcX,3)}, ${fmt(p.rftX,3)}, ${p.rfvX!=null?fmt(p.rfvX,3):'—'})`}
+                    <Row tex={`RF_X = \\min(RF_{comp}, RF_{tens}, RF_{shear})`}
+                         texF={`\\min(${fmt(p.rfcX,3)},\\ ${fmt(p.rftX,3)},\\ ${p.rfvX!=null?fmt(p.rfvX,3):'-'})`}
                          value={`${fmt(p.gX,3)}  [${p.govX}]`}
                          color={rfCol(p.gX)} bold bg="#fed7aa"/>
 
-                    <Hdr color="#92400e" bg="#fef3c7">RATING FACTORS — MODIFIED (lateral effects in denominator)</Hdr>
-                    <Row label="Denom_Mod = dM + M_mod"
-                         formula={`${fmt(dM)} + ${fmt(M_mod)} (CF + Wind + Long + Rock all in denominator)`}
+                    <Hdr color="#92400e" bg="#fef3c7">RATING FACTORS — MODIFIED (wind + rocking + longitudinal in denominator)</Hdr>
+                    <Row tex={`denom_{Mod} = dM + M_{wind} + M_{rock} + M_{long}`}
+                         texF={`${fmt(dM)} + ${fmt(M_mod)}`}
                          value={`${fmt(p.denomMod)} ft-kips`} bold bg="#fff7ed"/>
-                    <Row label="RF_comp = (Mc_X − MDL) / denomMod"
-                         formula={`(${fmt(p.McX)} − ${fmt(p.MDL)}) / ${fmt(p.denomMod)}`}
+                    <Row tex={`RF_{comp} = \\frac{M_{c,X} - M_{DL}}{denom_{Mod}}`}
+                         texF={`\\frac{${fmt(p.McX)} - ${fmt(p.MDL)}}{${fmt(p.denomMod)}}`}
                          value={`${fmt(p.rfcM,3)}`}
                          color={rfCol(p.rfcM)} bg={govAsdM.govM==='Comp'?'#fef3c7':undefined}
                          note={p.govM==='Comp'?'← governs':''}/>
-                    <Row label="RF_tens = (Mt_X − MDL) / denomMod"
-                         formula={`(${fmt(p.MtX)} − ${fmt(p.MDL)}) / ${fmt(p.denomMod)}`}
+                    <Row tex={`RF_{tens} = \\frac{M_{t,X} - M_{DL}}{denom_{Mod}}`}
+                         texF={`\\frac{${fmt(p.MtX)} - ${fmt(p.MDL)}}{${fmt(p.denomMod)}}`}
                          value={`${fmt(p.rftM,3)}`}
                          color={rfCol(p.rftM)} bg={govAsdM.govM==='Tens'?'#fef3c7':undefined}
                          note={p.govM==='Tens'?'← governs':''}/>
-                    <Row label="RF_M = min(RF_comp, RF_tens, RF_shear)"
-                         formula={`min(${fmt(p.rfcM,3)}, ${fmt(p.rftM,3)}, ${p.rfvM!=null?fmt(p.rfvM,3):'—'})`}
+                    <Row tex={`RF_M = \\min(RF_{comp}, RF_{tens}, RF_{shear})`}
+                         texF={`\\min(${fmt(p.rfcM,3)},\\ ${fmt(p.rftM,3)},\\ ${p.rfvM!=null?fmt(p.rfvM,3):'-'})`}
                          value={`${fmt(p.gM,3)}  [${p.govM}]`}
                          color={rfCol(p.gM)} bold bg="#fef3c7"/>
                     </>)}
@@ -12390,11 +12442,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {/* Fatigue */}
                     {govAsdFat&&(<>
                     <Hdr color="#7e22ce" bg="#faf5ff">FATIGUE RATING — AREMA §1.7 · Category {_aremaParams.fatCat} · SFT = {_aremaParams.SFT} ksi</Hdr>
-                    <Row label="RF_Fat = SFT × Sx_bot_net/12 / dM"
-                         formula={`${_aremaParams.SFT} × ${sec.SxBotN.toFixed(2)} / 12 / ${fmt(dM)}`}
+                    <Row tex={`RF_{Fat} = \\frac{SFT\\cdot S_{x,bot,net}/12}{dM_{fat}}`}
+                         texF={`\\frac{${_aremaParams.SFT} \\times ${sec.SxBotN.toFixed(2)}/12}{${fmt(govAsdFat.dM_fat??dM)}}`}
                          value={`${fmt(govAsdFat.rfFat,3)}`}
                          color={rfCol(govAsdFat.rfFat)} bold bg="#faf5ff"
-                         note="stress-range only"/>
+                         note="stress-range"/>
                     </>)}
 
                     <div style={{padding:'6px 10px',background:'#f8fafc',borderTop:'1px solid #e5e7eb',
