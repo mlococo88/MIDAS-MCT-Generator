@@ -465,7 +465,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
       ${Row('Shear capacity','F_s × A_w = '+f(vn/s.Aw,2)+'×'+f(s.Aw,3),f(vn)+' kips',{bg:caseBg})}
       ${Row('Dead load moment MDL','from DC load case × DL factor '+f(ap.dlFactor,2),f(p.MDL)+' ft-k'+(ap.dlFactor!==1?' [×'+f(ap.dlFactor,2)+' applied]':''))}
       ${Row('Live load moment MLL (unfactored)','from LL load case',f(p.MLL)+' ft-k')}
-      ${Row('Factored LL: dM = MLL×(1+I)×DF',f(p.MLL)+'×'+f(ap.f1pI,3)+'×'+ap.DF,f(p.dM)+' ft-k')}
+      ${Row('Factored LL: dM = MLL×(1+I)×DF×(1+CF)',f(p.MLL)+'×'+f(ap.f1pI,3)+'×'+ap.DF+'×'+f(1+(ap.CF_factor||0),4),f(p.dM)+' ft-k')}
       ${Row('Moment denominator','dM + lateral effects',f(denom)+' ft-k',{bg:'#f9fafb',bold:true})}
       ${Row('RF_comp = (Mc − MDL) / denom','('+f(mc)+' − '+f(p.MDL)+') / '+f(denom),f(rfC_,3),{bg:govCtrl==='Comp'?caseBg:'',color:rfC(rfC_),bold:govCtrl==='Comp'})}
       ${Row('RF_tens = (Mt − MDL) / denom','('+f(mt)+' − '+f(p.MDL)+') / '+f(denom),f(rft_,3),{bg:govCtrl==='Tens'?caseBg:'',color:rfC(rft_),bold:govCtrl==='Tens'})}
@@ -811,7 +811,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
          ['Rail ht above top flange',f(ap.h_rail,2)+' ft'],['Track offset from CL',f(ap.e_track,2)+' ft'],
          ['Ix_group = Σd²',f(ap.Ix_grp,3)+' ft²'],['d_max (govern. girder)',f(ap.d_max,3)+' ft'],
          ['Calculated DF',f(ap.DF_calc,4)],
-         ['H_wind (arm: h_rail+8)',f(ap.H_wind,2)+' ft'],['H_CF (arm: h_rail+6)',f(ap.H_CF,2)+' ft'],
+         ['H_wind (arm: h_rail+8)',f(ap.H_wind,2)+' ft'],
          ['Fatigue category',ap.fatCat],['SFT (allowable stress range)',ap.SFT+' ksi']
       ].map(([l,v])=>`<div class="info-row"><span class="info-label">${l}</span><span style="font-family:monospace">${v}</span></div>`).join('')}
     </div>
@@ -838,11 +838,11 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
       ${TD('0.20×P×gauge_ft×d_max/Ix = 0.20×'+ap.axle+'×'+f(ap.gauge_ft,3)+'×'+f(ap.d_max,2)+'/'+f(ap.Ix_grp,2),{align:'left'})}
       ${TD('—')}${TD('R_rock='+f(ap.R_rock,3))}${TD(f(ap.M_rock,2),{bold:true})}
     </tr>
-    ${ap.curveR>0?`<tr>
-      ${TD('Centrifugal Force',{align:'left'})}${TD('§1.3.4')}
-      ${TD('C/W=0.00117×'+ap.curveV+'²/'+ap.curveR+'='+f(ap.CF_CW,4)+' · F_CF='+f(ap.F_CF,3)+' k · H_CF='+f(ap.H_CF,2)+' ft · R_CF='+f(ap.R_CF,3)+' k',{align:'left'})}
-      ${TD(f(ap.F_CF,3))}${TD(f(ap.R_CF,3))}${TD(f(ap.M_CF,2),{bold:true})}
-    </tr>`:'<tr>'+TD('Centrifugal Force',{align:'left'})+TD('§1.3.4')+TD('Straight track — N/A',{align:'left'})+TD('0')+TD('0')+TD('0')+'</tr>'}
+    ${ap.curveDegree>0?`<tr>
+      ${TD('Centrifugal Force',{align:'left'})}${TD('§1.3.6')}
+      ${TD('C=0.00117×'+ap.curveSpeed+'²×'+ap.curveDegree+'='+f(ap.C,4)+'% · CF_factor=C×8×d_max/Ix='+f(ap.C,4)+'×8×'+f(ap.d_max,2)+'/'+f(ap.Ix_grp,2)+'='+f(ap.CF_factor,4)+' (increases LL like impact)',{align:'left'})}
+      ${TD(f(ap.CF_factor,4))}${TD('×LL')}${TD('(1+CF)',{bold:true})}
+    </tr>`:'<tr>'+TD('Centrifugal Force',{align:'left'})+TD('§1.3.6')+TD('Straight track (D=0) — N/A',{align:'left'})+TD('0')+TD('0')+TD('0')+'</tr>'}
     ${ap.longLC?`<tr style="background:#f0fdf4">
       ${TD('Longitudinal (Braking/Traction)',{align:'left'})}${TD('§1.3.3')}
       ${TD('F_B=45+1.2×'+ap.span+'='+f(ap.F_brake_act,1)+'k · F_T=25√'+ap.span+'='+f(ap.F_tract_act,1)+'k · gov='+ap.long_governs_act+' · mult='+f(ap.long_mult,4),{align:'left'})}
@@ -851,12 +851,12 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
     </tbody>
   </table>
   <div style="padding:6px 12px;background:#92400e;color:#fef3c7;border-radius:4px;font-family:monospace;font-size:8.5pt;margin-bottom:8px">
-    Normal &amp; Maximum denom: dM + M_CF = dM + ${f(ap.M_CF,2)} ft-k &nbsp;|&nbsp;
-    Modified denom: dM + M_CF + M_wind + M_rock${ap.longLC?' + M_long_node':''} = dM + ${f(ap.M_mod,2)} ft-k (+ per-node longitudinal)
+    Normal &amp; Maximum denom: dM (no CF moment) &nbsp;|&nbsp;
+    Modified denom: dM + M_wind + M_rock${ap.longLC?' + M_long_node':''} = dM + ${f(ap.M_mod,2)} ft-k (+ per-node longitudinal) [CF now applied as separate distribution factor]
   </div>
   <div style="font-size:8pt;font-family:monospace;color:#6b7280">
-    Shear: dV_N = dV + V_CF = dV + ${f(ap.V_CF_lat,3)} k &nbsp;|&nbsp;
-    dV_mod = dV + ${f(ap.V_CF_lat,3)} + ${f(ap.V_wind_lat,3)} + ${f(ap.V_rock_lat,3)} k${ap.longLC?' + V_long_node':''}
+    Shear: dV_N = dV + V_wind &nbsp;|&nbsp;
+    dV_mod = dV + ${f(ap.V_wind_lat,3)} + ${f(ap.V_rock_lat,3)} k${ap.longLC?' + V_long_node':''}
   </div>
 
   `:''}
@@ -5963,6 +5963,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   const [collapsedTbls, setCollapsedTbls] = React.useState({});  // tracks which node tables are collapsed
   const [selectedLoad, setSelectedLoadLocal] = useState(selectedLoadProp||'');
   const [staleAcknowledged, setStaleAcknowledged] = useState(false);
+  const [showRocking, setShowRocking] = React.useState(false);  // rocking effects detail panel (AREMA mode)
 
   // Combo state (local UI only — data lives in App via resultsCombos prop)
   const combos = resultsCombos || [];
@@ -6767,7 +6768,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   const hasAremaAnywhere = capZones.some(z=>z.type==='arema') || !!(cfg.aremaSection?.enabled);
 
   // Helper: extract AREMA params from cfg.rating (single source of truth)
-  const _aremaParams = (()=>{
+  const _aremaParams = (()=>{ try {
     const R2 = cfg?.rating||{};
     const span    = Math.max(20, +(cfg?.spans?.[0] ?? 50));  // Use first span from Geometry tab
     const impAuto = R2.arema_imp_auto !== false;
@@ -6834,9 +6835,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     // ── AREMA-specified heights above top of rail ───────────────────────────
     // (code values — not user input)
     // Wind on LL : 8 ft above top of rail  (AREMA §1.3.7)
-    // CF          : 6 ft above top of rail  (AREMA §1.3.4)
     const H_wind  = h_rail + 8;   // arm from top of girder flange to wind-on-LL resultant (ft)
-    const H_CF    = h_rail + 6;   // arm from top of girder flange to CF resultant (ft)
 
     // ── Wind on LL: 0.200 k/ft uniform horizontal load ─────────────────────
     // Converted to additional vertical UDL on governing girder via overturning couple:
@@ -6851,17 +6850,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const R_rock   = 0;   // rocking moment removed from lateral — now in f1pI
     const M_rock   = 0;   // rocking handled via I_rock impact addition
 
-    // ── Centrifugal force (curved track) ───────────────────────────────────
-    // C/W = 0.00117×V²/R  (dimensionless CF ratio per AREMA §1.3.4)
-    // Horizontal CF force per governing axle: F_CF = C/W × axle
-    // Distributed via overturning couple: R_CF = F_CF × H_CF × d_max / Ix_grp
-    // Moment (axle at midspan): M_CF = R_CF × span/4
-    const curveR  = +(R2.arema_curveR ?? 0);
-    const curveV  = +(R2.arema_curveV ?? 0);
-    const CF_CW   = curveR>0 ? 0.00117*curveV*curveV/curveR : 0;   // C/W ratio
-    const F_CF    = CF_CW * axle;                                   // kips horizontal
-    const R_CF    = (Ix_grp>0 && curveR>0) ? F_CF * H_CF * d_max / Ix_grp : 0;  // kips vertical
-    const M_CF    = R_CF * span / 4;   // ft-kips
+    // ── Centrifugal force (curved track) — AREMA §1.3.6 ─────────────────────
+    // C = 0.00117×S²×D  (centrifugal factor, percent — S=speed mph, D=degree of curve)
+    // CF applied horizontally 8 ft above top of rail → overturning moment = 8×C
+    // Distributed to girders by rigid body rotation: CF_factor = (8×C) × d_max / I_x
+    const curveSpeed  = +(R2.arema_curveSpeed ?? 60);    // design speed (mph)
+    const curveDegree = +(R2.arema_curveDegree ?? 0);    // degree of curve (°)
+    const H_CF = 8;  // ft above top of rail (AREMA §1.3.6 application point)
+    const C = (curveDegree > 0) ? 0.00117 * curveSpeed * curveSpeed * curveDegree : 0;  // centrifugal factor (%)
+    const CF_factor = (Ix_grp > 0 && C > 0) ? C * H_CF * d_max / Ix_grp : 0;  // distribution factor
 
     // ── Longitudinal (braking/traction) — AREMA §1.3.3 ──────────────────
     // AREMA formulas for single track, kips:
@@ -6899,16 +6896,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     // The overturning couple adds vertical reactions that also produce shear
     // on the governing girder. Max shear from each lateral source:
     //   Wind (UDL):     V_wind_lat = q_V × L/2          (max shear at support from UDL)
-    //   Rocking (conc): V_rock_lat = R_rock              (concentrated load)
-    //   CF (conc):      V_CF_lat   = R_CF                (concentrated load)
+    //   Rocking (conc): V_rock_lat = 0                  (now in impact factor, not lateral)
+    //   CF (conc):      now distribution factor, not lateral shear
     const V_wind_lat = q_wind * span / 2;   // kips (from wind UDL on governing girder)
     const V_rock_lat = 0;                   // rocking now in impact, not lateral shear
-    const V_CF_lat   = R_CF;               // kips (CF concentrated vertical)
 
-    // M_CF : in Normal, Maximum AND Modified denominators
     // M_extra (wind + rock): Modified ONLY
+    // CF now applied as distribution factor to loads, not lateral moment
     const M_extra = M_wind + M_rock + M_long;
-    const M_mod   = M_CF + M_extra;     // global Modified M (longitudinal added per-node)
+    const M_mod   = M_extra;        // global Modified M (longitudinal added per-node)
     const M_lat   = M_mod;
 
     // ── Distribution Factor Calculator ────────────────────────────────────
@@ -6926,20 +6922,33 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const fatBeta  = +(R2.arema_fatBeta  ?? 0.15);  // fatigue impact factor (AREMA Table 15-7-1)
     const I_fat    = 1 + fatBeta * ballastF * (iBase + I_rock); // fatigue (1+I): β and ballast factor both apply
 
-    return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,llLC_shear,llNegLC,longLC,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
-            n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,H_CF,
-            q_wind,R_rock,R_CF,CF_CW,F_CF,gauge_ft,
-            V_wind_lat,V_rock_lat,V_CF_lat,
+    // Centrifugal force now applied as distribution factor, not moment
+    const M_CF = 0;  // CF no longer contributes to moment denominators
+
+    return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,llLC_shear,llNegLC,longLC,iAuto,iBase,I_rock,CF_factor,ballastDeck,ballastF,f1pI,
+            n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,gauge_ft,
+            q_wind,R_rock,V_rock_lat,
             M_wind,M_brake,M_tract,M_long,M_rock,M_CF,M_extra,M_mod,M_lat,
             longLC,long_L_ref,F_brake_act,F_tract_act,F_long_act,long_governs_act,
             F_brake_ref,F_tract_ref,F_long_ref,long_mult,
             e_track,DF_calc,
-            curveR,curveV,fatCat,SFT,fatAlpha,fatBeta,I_fat,dlFactor,ballastF};
+            curveSpeed,curveDegree,C,H_CF,fatCat,SFT,fatAlpha,fatBeta,I_fat,dlFactor};
+  } catch(e) {
+    console.error('AREMA params computation error:', e);
+    // Safe default so hooks after this IIFE still run (prevents React #300 hook-count mismatch)
+    return {span:50,impAuto:true,impMan:0.25,DF:0.5,gauge:56.5,axle:40,eNum:80,
+            dcLC:'',llLC:'',llLC_shear:'',llNegLC:'',longLC:'',iAuto:0,iBase:0,I_rock:0,CF_factor:0,
+            ballastDeck:false,ballastF:1,f1pI:1,n_gird:2,S_gird:6,h_rail:1.5,Ix_grp:0,d_max:0,H_wind:9.5,gauge_ft:4.708,
+            q_wind:0,R_rock:0,V_rock_lat:0,M_wind:0,M_brake:0,M_tract:0,M_long:0,M_rock:0,M_CF:0,M_extra:0,M_mod:0,M_lat:0,
+            long_L_ref:0,F_brake_act:0,F_tract_act:0,F_long_act:0,long_governs_act:'',
+            F_brake_ref:0,F_tract_ref:0,F_long_ref:0,long_mult:0,e_track:0,DF_calc:0.5,
+            curveSpeed:60,curveDegree:0,C:0,H_CF:8,fatCat:'D',SFT:6,fatAlpha:0.85,fatBeta:0.15,I_fat:1,dlFactor:1};
+  }
   })();
 
   const aremaAsdData = useMemo(()=>{
-    const {dcLC,llLC,llNegLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,
-           V_wind_lat,V_rock_lat,V_CF_lat,SFT,fatAlpha,I_fat,dlFactor} = _aremaParams;
+    const {dcLC,llLC,llNegLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,CF_factor,
+           V_wind_lat,V_rock_lat,SFT,fatAlpha,I_fat,dlFactor} = _aremaParams;
     if (!llLC || !origRows.length || !hasAremaAnywhere) return [];
 
     const nodeList = [...new Set(origRows.map(r=>r.node).filter(Boolean))]
@@ -6979,8 +6988,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const M_long_node = longp ? Math.abs(longp.momentY||0) * long_mult : 0;
       const V_long_node = longp ? longp.shearZ * long_mult : 0;
 
-      const dM  = MLL>0.001 ? MLL*f1pI*DF : null;
-      const dV  = VLL>0.001 ? VLL*f1pI*DF : null;
+      // CF_factor increases live load effects like impact: LL × (1 + CF_factor)
+      const cfMult = 1 + (CF_factor || 0);
+      const dM  = MLL>0.001 ? MLL*f1pI*DF*cfMult : null;
+      const dV  = VLL>0.001 ? VLL*f1pI*DF*cfMult : null;
 
       // ── Moment denominators ───────────────────────────────────────────
       // Only DL subtracted from capacity; LL + all other effects in denominator
@@ -6989,8 +7000,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
       // ── Shear denominators ────────────────────────────────────────────
       // Lateral overturning couple adds shear to the governing girder
-      const dV_N   = dV!=null ? dV + V_CF_lat                                          : null;
-      const dV_mod = dV!=null ? dV + V_CF_lat + V_wind_lat + V_rock_lat + V_long_node  : null;
+      const dV_N   = dV!=null ? dV + V_wind_lat                                          : null;
+      const dV_mod = dV!=null ? dV + V_wind_lat + V_rock_lat + V_long_node  : null;
 
       // Capacities
       const McN=sec.SxTopG*allo.Fb_N/12, MtN=sec.SxBotN*allo.Ft_N/12, VnN=sec.Aw*allo.Fs_N;
@@ -7043,8 +7054,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
   })();
 
   const aremaMultiData = useMemo(()=>{
-    const {dcLC,llLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,
-           V_wind_lat,V_rock_lat,V_CF_lat,SFT,fatAlpha,fatBeta,I_fat,dlFactor} = _aremaParams;
+    const {dcLC,llLC,llLC_shear,longLC,long_mult,f1pI,DF,M_CF,M_mod,CF_factor,
+           V_wind_lat,V_rock_lat,SFT,fatAlpha,fatBeta,I_fat,dlFactor} = _aremaParams;
     if (!origRows.length || !hasAremaAnywhere) return [];
 
     const vehicles = (cfg?.selectedVehicles||[]).map(vn=>{
@@ -7086,8 +7097,9 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const MLL = Math.max(0, llp?.momentY||0);
         const VLL = Math.max(Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
 
-        const dM = MLL>0.001 ? MLL*f1pI*DF : null;
-        const dV = VLL>0.001 ? VLL*f1pI*DF : null;
+        const cfMult = 1 + (CF_factor || 0);
+        const dM = MLL>0.001 ? MLL*f1pI*DF*cfMult : null;
+        const dV = VLL>0.001 ? VLL*f1pI*DF*cfMult : null;
         const denomN   = dM!=null ? dM + M_CF  : null;
         const denomMod = dM!=null ? dM + M_mod  : null;
 
@@ -7098,8 +7110,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         // Shear denominators must include lateral forces — same as aremaAsdData
         const longpV  = longLC ? nodeValsA(origRows,longLC,node) : null;
         const V_long_v = longpV ? longpV.shearZ * (_aremaParams.long_mult||0) : 0;
-        const dV_N    = dV!=null ? dV + V_CF_lat                                           : null;
-        const dV_mod  = dV!=null ? dV + V_CF_lat + V_wind_lat + V_rock_lat + V_long_v      : null;
+        const dV_N    = dV!=null ? dV + V_wind_lat                                           : null;
+        const dV_mod  = dV!=null ? dV + V_wind_lat + V_rock_lat + V_long_v      : null;
         const rfcN=denomN?(McN-MDL)/denomN:null, rftN=denomN?(MtN-MDL)/denomN:null, rfvN=dV_N?(VnN-VDL)/dV_N:null;
         const rfcX=denomN?(McX-MDL)/denomN:null, rftX=denomN?(MtX-MDL)/denomN:null, rfvX=dV_N?(VnX-VDL)/dV_N:null;
         const rfcM=denomMod?(McX-MDL)/denomMod:null, rftM=denomMod?(MtX-MDL)/denomMod:null, rfvM=dV_mod?(VnX-VDL)/dV_mod:null;
@@ -10619,15 +10631,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
               const showShear = R2.arema_show_shear !== false;
               const showFatigue = R2.arema_show_fatigue !== false;
               // All computed values come from _aremaParams (single source of truth)
-              const {span,impAuto,impMan,DF,gauge,axle,eNum,iAuto,iBase,I_rock,ballastDeck,ballastF,f1pI,
-                     n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,H_CF,
-                     q_wind,R_rock,R_CF,CF_CW,F_CF,gauge_ft,
-                     V_wind_lat,V_rock_lat,V_CF_lat,
-                     M_wind,M_brake,M_tract,M_long,M_rock,M_CF,M_extra,M_mod,M_lat,
+              const {span,impAuto,impMan,DF,gauge,axle,eNum,iAuto,iBase,I_rock,CF_factor,ballastDeck,ballastF,f1pI,
+                     n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,gauge_ft,
+                     q_wind,R_rock,
+                     V_wind_lat,V_rock_lat,
+                     M_wind,M_brake,M_tract,M_long,M_rock,M_extra,M_mod,M_lat,
                      longLC,long_L_ref,F_brake_act,F_tract_act,F_long_act,long_governs_act,
                      F_brake_ref,F_tract_ref,F_long_ref,long_mult,
                      e_track,DF_calc,
-                     curveR,curveV,fatCat,SFT,dlFactor} = _aremaParams;
+                     curveSpeed,curveDegree,C,fatCat,SFT,dlFactor} = _aremaParams;
               const aremaDcLC = R2.arema_dcLC || ratingDcLC  || '';
               const aremaLlLC = R2.arema_llLC || ratingLLposLC || '';
               const hasAremaZone = hasAremaAnywhere;
@@ -10720,6 +10732,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {[['Dist. Factor DF','arema_DF',DF,0.01],
                       ['Track Gauge (in)','arema_gauge',gauge,0.5],['Gov. Axle Load (k)','arema_axle',axle,1],
                       ['No. of Girders','arema_n',n_gird,1],
+                      ['Design Speed (mph)','arema_curveSpeed',R2.arema_curveSpeed??60,1],
+                      ['Degree of Curve (°)','arema_curveDegree',R2.arema_curveDegree??0,0.1],
                       ['Rail ht above top flange (ft)','arema_h_rail',h_rail,0.1]].map(([lbl,key,val,step])=>(
                       <div key={key}>
                         <div style={STYLES.monoSmall}>{lbl}</div>
@@ -10901,22 +10915,6 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         </div>
                       </div>
                     </div>
-                    {/* Centrifugal force */}
-                    <div>
-                      <div style={STYLES.monoSmall}>
-                        Curve Radius (ft) <span style={STYLES.dimText}>0=straight</span>
-                      </div>
-                      <input type="number" step="50" min="0" style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600'}}
-                        value={curveR} onChange={e=>setRating('arema_curveR',parseFloat(e.target.value)||0)}/>
-                    </div>
-                    <div>
-                      <div style={STYLES.monoSmall}>CF Speed (mph)</div>
-                      <input type="number" step="5" min="0" style={{...INP,fontSize:'12px',fontFamily:'monospace',fontWeight:'600'}}
-                        value={curveV} onChange={e=>setRating('arema_curveV',parseFloat(e.target.value)||0)}/>
-                      {curveR>0&&<div style={{fontSize:'8px',color:'#d97706',marginTop:'2px',fontFamily:'monospace'}}>
-                        C/W={((0.00117*curveV*curveV)/curveR).toFixed(4)} · M_CF={M_CF.toFixed(2)} kip-ft
-                      </div>}
-                    </div>
 
                   </div>
                   <div style={{marginTop:'7px',padding:'5px 10px',background:'#f3f4f6',borderRadius:'4px',fontSize:'9.5px',fontFamily:'monospace',color:'#374151'}}>
@@ -11081,20 +11079,18 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <div style={{color:'#9ca3af',fontSize:'7.5px',marginTop:'2px'}}>Not a separate lateral moment — M_rock = 0</div>
                     </div>
                     {/* CF */}
-                    <div style={{padding:'6px 8px',background:curveR>0?'#fff7ed':'#f9fafb',border:`1px solid ${curveR>0?'#fdba74':'#e5e7eb'}`,borderRadius:'4px',fontSize:'8.5px',fontFamily:'monospace'}}>
-                      <div style={{color:curveR>0?'#c2410c':'#9ca3af',fontWeight:'700',marginBottom:'3px'}}>
-                        🔄 Centrifugal Force {curveR===0&&'(straight track)'}
+                    <div style={{padding:'6px 8px',background:curveDegree>0?'#fff7ed':'#f9fafb',border:`1px solid ${curveDegree>0?'#fdba74':'#e5e7eb'}`,borderRadius:'4px',fontSize:'8.5px',fontFamily:'monospace'}}>
+                      <div style={{color:curveDegree>0?'#c2410c':'#9ca3af',fontWeight:'700',marginBottom:'3px'}}>
+                        🔄 Centrifugal Force {curveDegree===0&&'(straight track)'}
                       </div>
-                      <div style={{color:'#6b7280',fontSize:'7.5px',marginBottom:'2px'}}>AREMA §1.3.4 · 6 ft above top of rail</div>
-                      {curveR>0?<>
-                        <div>C/W = 0.00117×{curveV}²/{curveR} = <strong>{CF_CW.toFixed(4)}</strong></div>
-                        <div>F_CF = C/W × {axle} = <strong>{F_CF.toFixed(3)} k</strong></div>
-                        <div>H = h_rail+6 = {h_rail}+6 = <strong>{H_CF.toFixed(2)} ft</strong></div>
-                        <div>R_CF = F×H×d_max/Ix = <strong>{R_CF.toFixed(3)} k</strong></div>
+                      <div style={{color:'#6b7280',fontSize:'7.5px',marginBottom:'2px'}}>AREMA §1.3.6 · Lateral force 8 ft above top of rail → overturning moment</div>
+                      {curveDegree>0?<>
+                        <div>C = 0.00117×{curveSpeed}²×{curveDegree} = <strong>{C.toFixed(4)}%</strong></div>
+                        <div>CF_factor = C×8×d_max/Ix = {C.toFixed(4)}×8×{d_max.toFixed(3)}/{Ix_grp.toFixed(3)} = <strong>{CF_factor.toFixed(4)}</strong></div>
                         <div style={{color:'#c2410c',fontWeight:'700',marginTop:'2px'}}>
-                          M = R×L/4 = <strong>{M_CF.toFixed(2)} ft-k</strong>
+                          Applied to all ratings: LL × (1 + CF_factor) — increases live load like impact
                         </div>
-                      </>:<div style={STYLES.dimText}>M_CF = 0 (no curvature)</div>}
+                      </>:<div style={STYLES.dimText}>CF_factor = 0 (no curvature)</div>}
                     </div>
                   </div>
                   {/* Longitudinal placeholder */}
@@ -11105,7 +11101,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   {/* Summary */}
                   <div style={{padding:'6px 10px',background:'#92400e',borderRadius:'4px',
                     fontSize:'9.5px',fontFamily:'monospace',color:'#fef3c7',display:'flex',gap:'16px',flexWrap:'wrap'}}>
-                    <span>M_CF = {M_CF.toFixed(2)} ft-k (Normal &amp; Maximum denom)</span>
+                    <span>CF_factor = {CF_factor.toFixed(4)} → LL×{(1+CF_factor).toFixed(4)} (all ratings)</span>
                     <span>M_wind = {M_wind.toFixed(2)} · M_long = 0 ft-k (Modified extra) · Rocking → impact only</span>
                     <span style={{fontWeight:'700'}}>denom_Mod = dM + {M_mod.toFixed(2)} ft-k</span>
                   </div>
@@ -11561,7 +11557,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
                 {/* ── ROCKING EFFECTS DETAIL ── */}
                 {aremaAsdData.length>0&&(()=>{
-                  const [showRocking, setShowRocking] = React.useState(false);
+                  // showRocking state is declared at component top level (Rules of Hooks)
                   
                   // Recalculate for display (same as in calculation)
                   const n_gird = Math.max(2, Math.round(+(R2.arema_n ?? 2)));
@@ -11910,7 +11906,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {/* ── Table 1: Normal Flexure ── */}
                     {wrap(<>
                       <SecHdr icon="✓" title="NORMAL — Flexure" color="#15803d" bg="#f0fdf4"
-                        sub={`Fb_N=${govAsdN?.allo?.Fb_N.toFixed(2)} ksi (comp) · Ft_N=${govAsdN?.allo?.Ft_N.toFixed(2)} ksi (tens) · denom = MLL×(1+I)×DF + M_CF`}/>
+                        sub={`Fb_N=${govAsdN?.allo?.Fb_N.toFixed(2)} ksi (comp) · Ft_N=${govAsdN?.allo?.Ft_N.toFixed(2)} ksi (tens) · denom = MLL×(1+I)×DF×(1+CF)`}/>
                       <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f0fdf4" tc="#15803d" groups={[
@@ -11990,7 +11986,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {/* ── Table 3: Modified Flexure ── */}
                     {wrap(<>
                       <SecHdr icon="🌬" title="MODIFIED — Flexure" color="#92400e" bg="#fffbeb"
-                        sub={`K=0.80Fy (same allowable as Maximum) · denom = MLL×(1+I)×DF + M_CF + Wind + Rocking`}/>
+                        sub={`K=0.80Fy (same allowable as Maximum) · denom = MLL×(1+I)×DF×(1+CF) + Wind + Rocking`}/>
                       <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'680px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#fffbeb" tc="#92400e" groups={[
@@ -12022,14 +12018,14 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       </table>
                       </div>
                       <div style={{padding:'4px 10px',fontSize:'8px',fontFamily:'monospace',color:'#9ca3af',borderTop:'1px solid #e5e7eb'}}>
-                        Same K-factor capacities as Maximum · denom_Mod = dM + M_CF + M_wind + M_rock (longitudinal deferred)
+                        Same K-factor capacities as Maximum · denom_Mod = dM + M_wind + M_rock (no CF moment — applied separately, longitudinal deferred)
                       </div>
                     </>, '#fde68a','modFlex')}
 
                     {/* ── Table 4: Shear ── */}
                     {wrap(<>
                       <SecHdr icon="✂" title="SHEAR — All Cases" color="#374151" bg="#f9fafb"
-                        sub={`Vn_N = Fs_N×Aw · Vn_X = Fs_X×Aw · RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF`}/>
+                        sub={`Vn_N = Fs_N×Aw · Vn_X = Fs_X×Aw · RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF×(1+CF)`}/>
                       <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'700px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f3f4f6" tc="#374151" groups={[
@@ -12136,7 +12132,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const isInterp = xVal!=null && !aremaAsdData.find(r=>Math.abs(r.pos-xVal)<0.005);
                   const p = xVal!=null ? interpAt(xVal) : govAsdN;
                   const sec = p.sec, allo = p.allo;
-                  const {f1pI,DF,M_lat,M_wind,M_long,M_rock,M_CF,span} = _aremaParams;
+                  const {f1pI,DF,M_lat,M_wind,M_long,M_rock,M_CF,CF_factor,span} = _aremaParams;
                   const dM = p.dM, dV = p.dV;
                   const fmt = (v,d=2)=>v!=null&&isFinite(v)?v.toFixed(d):'—';
                   const rfCol = rf=>rf>=1?'#059669':rf>=0.5?'#d97706':'#dc2626';
@@ -12227,14 +12223,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <Row label="Distribution factor DF"
                          formula="user-entered"
                          value={`${DF}`}/>
-                    <Row label="Factored LL: dM = MLL × (1+I) × DF"
-                         formula={`${fmt(p.MLL)} × ${fmt(f1pI,3)} × ${DF}`}
+                    <Row label="Factored LL: dM = MLL × (1+I) × DF × (1+CF)"
+                         formula={`${fmt(p.MLL)} × ${fmt(f1pI,3)} × ${DF} × ${fmt(1+(CF_factor||0),4)}`}
                          value={`${fmt(dM)} ft-kips`} bold bg="#f9fafb"/>
-                    {M_CF>0&&<Row label="CF moment: M_CF"
-                         formula={`0.00117×${curveV}²/${curveR}×${axle}×8/12`}
-                         value={`${fmt(M_CF)} ft-kips`}/>}
-                    <Row label={`Denom_N = dM + M_CF = ${fmt(dM)} + ${fmt(M_CF)}`}
-                         formula="LL+I+CF — Normal & Maximum denominator"
+                    <Row label={`Denom_N = dM (LL+I+CF)`}
+                         formula="LL × (1+I) × DF × (1+CF) — Normal & Maximum denominator"
                          value={`${fmt(p.denomN)} ft-kips`} bold bg="#f0fdf4"/>
 
                     {/* Rating — Normal */}
@@ -12259,7 +12252,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                          value={`${fmt(p.gN,3)}  [${p.govN}]`}
                          color={rfCol(p.gN)} bold bg="#dcfce7"/>
                     <div style={{padding:'3px 8px',fontSize:'8px',fontFamily:'monospace',color:'#9ca3af'}}>
-                      denomN = MLL×(1+I)×DF + M_CF = {fmt(dM)} + {fmt(M_CF)} = {fmt(p.denomN)} ft-kips · Only MDL subtracted from capacity
+                      denomN = MLL×(1+I)×DF×(1+CF) = {fmt(dM)} ft-kips · Only MDL subtracted from capacity · CF increases LL like impact
                     </div>
 
                     {/* Rating — Modified */}
@@ -12274,9 +12267,9 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <Row label="Shear Fs_X = 0.75 × K"
                          formula={`0.75 × ${fmt(allo.K)}`}
                          value={`${fmt(allo.Fs_X)} ksi`} color="#92400e"/>
-                    <Hdr color="#c2410c" bg="#fff7ed">RATING FACTORS — MAXIMUM (DL + LL+I + CF, K-factor allowables)</Hdr>
-                    <Row label="Denom_N = dM + M_CF"
-                         formula={`${fmt(dM)} + ${fmt(M_CF)} (same denominator as Normal)`}
+                    <Hdr color="#c2410c" bg="#fff7ed">RATING FACTORS — MAXIMUM (DL + LL+I, K-factor allowables, CF as separate distribution)</Hdr>
+                    <Row label="Denom_N = dM (no CF moment)"
+                         formula={`${fmt(dM)} (same as Normal — CF applied separately)`}
                          value={`${fmt(p.denomN)} ft-kips`} bold bg="#fff7ed"/>
                     <Row label="Mc_X = Fb_X × Sx_top / 12"
                          formula={`${fmt(allo.Fb_X)} × ${sec.SxTopG.toFixed(2)} / 12`}
@@ -13079,8 +13072,8 @@ const DEFAULT_CFG = {
     // AREMA ASD rating parameters
     arema_DF:0.5, arema_gauge:56.5, arema_axle:40,
     arema_n:2, arema_S:6.0, arema_spacings:'', arema_h_rail:1.5, arema_ballast:false,
+    arema_curveSpeed:60, arema_curveDegree:0,
     arema_imp_auto:true, arema_imp_man:0.25,
-    arema_curveR:0, arema_curveV:0,
     arema_fatCat:'D', arema_fatAlpha:0.85, arema_fatBeta:0.15, arema_mod:true,
     arema_dcLC:'', arema_llLC:'', arema_llNegLC:'', arema_longLC:'', arema_dlFactor:1.0, arema_userPos:'',
     arema_show_normal:true, arema_show_maximum:true, arema_show_modified:true, arema_show_shear:true, arema_show_fatigue:true,
