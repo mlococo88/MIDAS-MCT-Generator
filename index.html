@@ -239,6 +239,48 @@ const W_SHAPES = [
   "W33X118","W33X130","W33X141","W33X152","W33X169",
   "W36X135","W36X150","W36X160","W36X170","W36X182","W36X194",
 ];
+
+// Rolled W and S shapes database (for AREMA equivalent built-up conversion)
+// Properties: d=depth(in), bf=flange width(in), tf=flange thickness(in), tw=web thickness(in), Fy=yield strength(ksi)
+const ROLLED_SHAPES = {
+  'W14X22': {d:13.74, bf:5.04, tf:0.230, tw:0.230, Fy:50},
+  'W14X26': {d:13.91, bf:5.73, tf:0.255, tw:0.255, Fy:50},
+  'W14X30': {d:13.84, bf:6.73, tf:0.285, tw:0.270, Fy:50},
+  'W14X38': {d:14.10, bf:6.77, tf:0.313, tw:0.313, Fy:50},
+  'W14X48': {d:14.50, bf:8.03, tf:0.595, tw:0.340, Fy:50},
+  'W16X26': {d:15.69, bf:5.50, tf:0.250, tw:0.250, Fy:50},
+  'W16X40': {d:16.01, bf:6.99, tf:0.305, tw:0.305, Fy:50},
+  'W16X50': {d:16.26, bf:7.07, tf:0.380, tw:0.380, Fy:50},
+  'W16X67': {d:16.54, bf:8.25, tf:0.395, tw:0.395, Fy:50},
+  'W18X35': {d:17.61, bf:6.00, tf:0.300, tw:0.300, Fy:50},
+  'W18X50': {d:17.99, bf:7.50, tf:0.355, tw:0.300, Fy:50},
+  'W18X65': {d:18.35, bf:7.59, tf:0.450, tw:0.450, Fy:50},
+  'W21X44': {d:20.66, bf:6.50, tf:0.350, tw:0.350, Fy:50},
+  'W21X55': {d:20.84, bf:8.27, tf:0.375, tw:0.315, Fy:50},
+  'W21X68': {d:21.13, bf:8.27, tf:0.430, tw:0.430, Fy:50},
+  'W24X55': {d:23.57, bf:7.01, tf:0.395, tw:0.395, Fy:50},
+  'W24X68': {d:23.73, bf:8.99, tf:0.415, tw:0.385, Fy:50},
+  'W24X76': {d:23.92, bf:8.99, tf:0.440, tw:0.385, Fy:50},
+  'W24X94': {d:24.31, bf:9.07, tf:0.516, tw:0.516, Fy:50},
+  'W27X84': {d:26.71, bf:9.96, tf:0.475, tw:0.290, Fy:50},
+  'W27X94': {d:26.92, bf:9.99, tf:0.490, tw:0.490, Fy:50},
+  'W27X102': {d:26.92, bf:9.90, tf:0.515, tw:0.315, Fy:50},
+  'W27X114': {d:27.29, bf:10.07, tf:0.570, tw:0.570, Fy:50},
+  'W30X90': {d:29.65, bf:10.33, tf:0.470, tw:0.470, Fy:50},
+  'W30X108': {d:29.83, bf:10.48, tf:0.545, tw:0.315, Fy:50},
+  'W30X124': {d:30.17, bf:10.54, tf:0.625, tw:0.625, Fy:50},
+  'W36X135': {d:35.55, bf:11.95, tf:0.600, tw:0.600, Fy:50},
+  'W36X150': {d:36.19, bf:11.84, tf:0.625, tw:0.405, Fy:50},
+  'W36X170': {d:36.41, bf:12.03, tf:0.680, tw:0.680, Fy:50},
+  'W36X194': {d:36.69, bf:12.12, tf:0.765, tw:0.765, Fy:50},
+  'S12X31.8': {d:12.00, bf:5.08, tf:0.391, tw:0.260, Fy:36},
+  'S15X42.9': {d:15.00, bf:5.50, tf:0.411, tw:0.311, Fy:36},
+  'S18X54.7': {d:18.00, bf:6.00, tf:0.461, tw:0.359, Fy:36},
+  'S24X79.9': {d:24.00, bf:6.50, tf:0.500, tw:0.425, Fy:36},
+  'S30X118': {d:30.00, bf:8.00, tf:0.625, tw:0.625, Fy:36},
+  'S36X150': {d:36.00, bf:8.00, tf:0.625, tw:0.625, Fy:36},
+};
+
 const STEPS=["Project","Geometry","Sections","Loads","Moving Loads","Combos","Generate","Results","AASHTO Rating","AREMA Rating"];
 const STEP_ICONS=["📋","📐","🔩","⬇","🚛","🔗","📄","📊","⚖","🚂"];
 
@@ -1201,7 +1243,9 @@ function generateMCT(cfg) {
     const mctId = aremaSecMCTId.get(libSec.id);
     const eq    = aremaEquiv[libSec.id];
     if (!eq) return;
-    const sname = (libSec.name||libSec.id).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,20).padEnd(20);
+    // Use actual rolled section name if this came from a rolled shape, otherwise use section name
+    const displayName = libSec.type === 'rolled' ? libSec.rolledName : libSec.name;
+    const sname = (displayName||libSec.id).replace(/[^A-Za-z0-9_-]/g,'_').slice(0,20).padEnd(20);
     // MIDAS H-section MCT order: H_total, B1, tw, tf1, B2, tf2
     p(`    ${mctId}, DBUSER    , ${sname}, CC, 0, 0, 0, 0, 0, 0, YES, NO, H  , 2, ${eq.H}, ${eq.B1}, ${eq.tw}, ${eq.tf1}, ${eq.B2}, ${eq.tf2}, 0, 0, 0, 0`);
   });
@@ -1718,36 +1762,121 @@ function StepGeometry({cfg,set}) {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Merge built-in ROLLED_SHAPES with user-defined custom shapes
+// ─────────────────────────────────────────────────────────────────────────────
+function getAllRolledShapes(customRolledShapes = {}) {
+  return {...ROLLED_SHAPES, ...customRolledShapes};
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Convert rolled W/S shape to equivalent built-up section for AREMA rating
+// ─────────────────────────────────────────────────────────────────────────────
+function convertRolledToBuiltUp(rolledName, customRolledShapes = {}) {
+  // Check both built-in and custom shapes
+  const allShapes = getAllRolledShapes(customRolledShapes);
+  const rolled = allShapes[rolledName];
+  if (!rolled) return null;
+  
+  const isCustom = !!(customRolledShapes && customRolledShapes[rolledName]);
+  
+  // Calculate web height based on whether it's custom or built-in (in inches)
+  let webHeight; // in inches
+  if (isCustom) {
+    // Custom shape: d = H (web height only, no flanges)
+    webHeight = rolled.d;
+  } else {
+    // Built-in rolled shape: d = total depth, calculate clear web height
+    webHeight = rolled.d - 2 * rolled.tf;
+  }
+  
+  // Create default components structure (all dimensions in inches)
+  const comps = [
+    { id:'tcp', label:'Top Cover Plates',     color:'#3b82f6', type:'plate', side:'top', on:true,  w:rolled.bf, t:rolled.tf, qty:1 },
+    { id:'tan', label:'Top Angles',           color:'#22c55e', type:'angle', side:'top', on:false, w:0, h:0, t:0, qty:2 },
+    { id:'twl', label:'Top Web Side Plate L', color:'#a855f7', type:'wsp',   side:'top', on:false, w:0, h:0, qty:1 },
+    { id:'twr', label:'Top Web Side Plate R', color:'#a855f7', type:'wsp',   side:'top', on:false, w:0, h:0, qty:1 },
+    { id:'web', label:'Web Plate',            color:'#ef4444', type:'web',   side:'web', on:true,  w:rolled.tw, h:webHeight, qty:1 },
+    { id:'bwl', label:'Bot Web Side Plate L', color:'#a855f7', type:'wsp',   side:'bot', on:false, w:0, h:0, qty:1 },
+    { id:'bwr', label:'Bot Web Side Plate R', color:'#a855f7', type:'wsp',   side:'bot', on:false, w:0, h:0, qty:1 },
+    { id:'ban', label:'Bottom Angles',        color:'#22c55e', type:'angle', side:'bot', on:false, w:0, h:0, t:0, qty:2 },
+    { id:'bcp', label:'Bottom Cover Plates',  color:'#3b82f6', type:'plate', side:'bot', on:true,  w:rolled.bf, t:rolled.tf, qty:1 },
+  ];
+  
+  // Create equivalent built-up section
+  return {
+    id: 'rolled_' + rolledName.replace(/[X×]/g, 'x'),
+    name: rolledName,
+    type: 'rolled',                    // Track that this came from a rolled section
+    rolledName: rolledName,            // Remember the actual shape name for MCT export
+    outToOut: webHeight,               // Web height in inches
+    Fy: rolled.Fy,
+    aremaComps: comps,                 // Built-up section components (dimensions in inches)
+    // Other required fields
+    holeDiam: 0,
+    holePitch: 3,
+    holeGage: 1.5,
+    holesInChain: 0,
+    webHoleDiam: 0,
+    webHolePitch: 3,
+    webHoleGage: 1.5,
+    webHolesInChain: 0,
+    sectionLossEnabled: false,
+    unbracedL: 240,
+    ryc: 0,
+    autoRyc: true,
+    bypass85: false
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Section Library + Zone Assignments editor
 // Proper React component so hooks (useState) are valid
 // ─────────────────────────────────────────────────────────────────────────────
-function AremaLibraryEditor({AS, setAS, totalLen}) {
+function AremaLibraryEditor({AS, setAS, totalLen, customRolledShapes = {}}) {
   const [editIdx, setEditIdx] = React.useState(0);
   const [showDetail, setShowDetail] = React.useState(false);
 
   const library  = AS.sectionLibrary || [];
   const zones    = AS.sectionZones   || [];
   const baseComps = AS.aremaComps || defaultAremaComps();
+  
+  // Merge built-in and custom rolled shapes
+  const allRolledShapes = getAllRolledShapes(customRolledShapes);
 
   // ── library helpers ────────────────────────────────────────────────────────
   const newId = () => 'sl' + Date.now().toString(36) + Math.random().toString(36).slice(2,5);
 
-  const addSection = () => {
-    const ns = {
-      id: newId(), name: 'Section ' + (library.length + 1),
-      aremaComps: JSON.parse(JSON.stringify(baseComps)),
-      outToOut: AS.outToOut||42,
-      holeDiam: AS.holeDiam??0, holePitch: AS.holePitch??3,
-      holeGage: AS.holeGage??1.5, holesInChain: AS.holesInChain??0,
-      webHoleDiam: 0, webHolePitch: 3, webHoleGage: 1.5, webHolesInChain: 0,
-      Fy: AS.Fy||36, unbracedL: AS.unbracedL||240,
-      ryc: AS.ryc||0, autoRyc: AS.autoRyc!==false,
-      sectionLossEnabled: false,  // per-section loss: enable to enter face losses
-      bypass85: false,              // if true, skip 0.85×gross net section floor (diagnostic)
-    };
+
+  const addSection = (type = 'builtin', rolledName = null) => {
+    let ns;
+    
+    if (type === 'rolled' && rolledName) {
+      // Convert rolled shape to equivalent built-up section
+      const equiv = convertRolledToBuiltUp(rolledName, customRolledShapes);
+      if (!equiv) {
+        alert(`Unknown shape: ${rolledName}`);
+        return;
+      }
+      ns = equiv;
+    } else {
+      // Custom built-up section (existing logic)
+      ns = {
+        id: newId(), name: 'Section ' + (library.length + 1),
+        aremaComps: JSON.parse(JSON.stringify(baseComps)),
+        outToOut: AS.outToOut||42,
+        holeDiam: AS.holeDiam??0, holePitch: AS.holePitch??3,
+        holeGage: AS.holeGage??1.5, holesInChain: AS.holesInChain??0,
+        webHoleDiam: 0, webHolePitch: 3, webHoleGage: 1.5, webHolesInChain: 0,
+        Fy: AS.Fy||36, unbracedL: AS.unbracedL||240,
+        ryc: AS.ryc||0, autoRyc: AS.autoRyc!==false,
+        sectionLossEnabled: false,
+        bypass85: false,
+      };
+    }
+    
     const newLib = [...library, ns];
     setAS({sectionLibrary: newLib});
-    setEditIdx(newLib.length - 1);
+    setEditIdx(newLib.length - 1);  // Auto-open editor for loss input
   };
 
   const updLib = (idx, patch) =>
@@ -1967,17 +2096,48 @@ function AremaLibraryEditor({AS, setAS, totalLen}) {
       <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af'}}>
         Define named sections — assign them to span zones below
       </span>
-      <button onClick={addSection}
+      <button onClick={() => addSection('builtin')}
         style={{marginLeft:'auto',padding:'4px 12px',background:'#1d4ed8',color:'#fff',
           border:'none',borderRadius:'4px',fontSize:'10px',cursor:'pointer',fontWeight:'600'}}>
-        + New Section
+        + Custom Built-Up
       </button>
+      <div style={{display:'flex',alignItems:'center',gap:'4px'}}>
+        <label style={{fontSize:'10px',fontWeight:'500',color:'#374151'}}>Convert Rolled:</label>
+        <select 
+          onChange={(e) => {
+            if (e.target.value) {
+              addSection('rolled', e.target.value);
+              e.target.value = '';
+            }
+          }}
+          style={{...INP,fontSize:'10px',padding:'4px 6px',maxWidth:'140px'}}
+        >
+          <option value="">Select shape...</option>
+          <optgroup label="Built-in W-Shapes">
+            {Object.keys(ROLLED_SHAPES).filter(k => k.startsWith('W')).map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Built-in S-Shapes">
+            {Object.keys(ROLLED_SHAPES).filter(k => k.startsWith('S')).map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </optgroup>
+          {Object.keys(customRolledShapes).length > 0 && (
+            <optgroup label="Custom Shapes">
+              {Object.keys(customRolledShapes).map(name => (
+                <option key={name} value={name}>{name}</option>
+              ))}
+            </optgroup>
+          )}
+        </select>
+      </div>
     </div>
 
     {library.length === 0 && (
       <div style={{padding:'14px',textAlign:'center',background:'#eff6ff',border:'1px dashed #bfdbfe',
         borderRadius:'6px',fontSize:'11px',color:'#6b7280',marginBottom:'10px'}}>
-        No sections defined. Click <strong>+ New Section</strong> to create one.
+        No sections defined. Click <strong>+ Custom Built-Up</strong> or <strong>Convert Rolled</strong> to create one.
         <br/>The base section above is used everywhere by default.
       </div>
     )}
@@ -2987,6 +3147,36 @@ function StepSections({cfg,set}) {
                         background:col+'15',padding:'2px 8px',borderRadius:'99px',border:`1px solid ${col}30`}}>
                         iSEC={secIdMap[z.name]||'?'}
                       </span>
+                      {isCustom && (
+                        <button
+                          onClick={() => {
+                            if (!z.name.trim()) {
+                              alert('Please enter a shape name first');
+                              return;
+                            }
+                            const allShapes = getAllRolledShapes(cfg.customRolledShapes || {});
+                            if (allShapes[z.name]) {
+                              alert(`Shape "${z.name}" already exists`);
+                              return;
+                            }
+                            // Convert plate girder dimensions (inches) to rolled shape properties
+                            const newShape = {
+                              d: z.H || 0,           // Depth in inches
+                              bf: Math.max(z.B1, z.B2) || 0,  // Flange width (use larger)
+                              tf: (parseFloat(z.tf1) + parseFloat(z.tf2)) / 2 || 0,  // Avg flange thickness
+                              tw: z.tw || 0,         // Web thickness in inches
+                              Fy: 50                 // Default yield strength
+                            };
+                            const newCustom = {...(cfg.customRolledShapes || {}), [z.name]: newShape};
+                            set('customRolledShapes', newCustom);
+                            alert(`Saved "${z.name}" to custom shapes database!`);
+                          }}
+                          title="Save this plate girder as a custom rolled shape"
+                          style={{padding:'4px 10px',background:'#059669',color:'#fff',border:'none',borderRadius:'4px',
+                            cursor:'pointer',fontWeight:'600',fontSize:'9px',whiteSpace:'nowrap'}}>
+                          💾 Save Shape
+                        </button>
+                      )}
                     </div>
                     {/* Custom I-shape dims — in INCHES */}
                     <div style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'10px 12px'}}>
@@ -3098,7 +3288,7 @@ function StepSections({cfg,set}) {
             )}
           </div>
           {/* Library editor — primary interface */}
-          {enabled&&<AremaLibraryEditor AS={AS} setAS={setAS} totalLen={totalLen}/>}
+          {enabled&&<AremaLibraryEditor AS={AS} setAS={setAS} totalLen={totalLen} customRolledShapes={cfg.customRolledShapes||{}}/>}
 
         {!enabled&&(
           <div style={{padding:'14px 18px',background:'#f9fafb',border:'1px dashed #e5e7eb',borderRadius:'6px',
@@ -12922,6 +13112,8 @@ const DEFAULT_CFG = {
     zonesEnabled: false,
     sectionZones: [],
   },
+  // ── Custom Rolled Shapes (user-defined W and S sections) ─────────────────────
+  customRolledShapes: {},  // {shapeName: {d, bf, tf, tw, Fy}, ...}
 };
 // loadCombos is computed from deadLoads so it can reference names
 DEFAULT_CFG.loadCombos = buildDefaultCombos(DEFAULT_CFG.deadLoads);
