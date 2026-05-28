@@ -7126,7 +7126,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const gN=rN.length?Math.min(...rN):null, gX=rX.length?Math.min(...rX):null, gM=rM.length?Math.min(...rM):null;
         // Store all individual RFs for summary table interpolation
         return {node, pos:xPos, gN, gX, gM, rfFat:rF,
-          rfcN, rftN, rfvN, rfcX, rftX, rfvX, rfcM, rftM, rfvM, dV_N, dV_mod};
+          rfcN, rftN, rfvN, rfcX, rftX, rfvX, rfcM, rftM, rfvM, dV_N, dV_mod,
+          dM, denomN, denomMod, dM_fat:dM_fat_v, MLL, VLL};
       }).filter(Boolean);
 
       if (!nodeRes.length) return null;
@@ -11654,8 +11655,54 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   );
                 })()}
 
+                {/* Multi-Vehicle Load Case Assignment + Diagnostics */}
+                {hasAremaZone&&(cfg?.selectedVehicles?.length>0)&&(()=>{
+                  const selVeh = cfg.selectedVehicles||[];
+                  const matched = selVeh.filter(vn=>(vehicleLCMap[vn]||{}).posLC);
+                  const unmatched = selVeh.filter(vn=>!(vehicleLCMap[vn]||{}).posLC);
+                  return (
+                    <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px'}}>
+                      <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>
+                        🚛 Multi-Vehicle Load Case Assignment
+                        <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',fontWeight:'400'}}> &nbsp;— pick each vehicle's moving load case (auto-detected by name; override here)</span>
+                      </div>
+                      {unmatched.length>0&&(
+                        <div style={{padding:'7px 10px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'5px',
+                          fontSize:'10px',fontFamily:'monospace',color:'#92400e',marginBottom:'8px'}}>
+                          ⚠ {unmatched.length} vehicle{unmatched.length>1?'s':''} ({unmatched.map(vn=>ALL_VEHICLES.find(v=>v.name===vn)?.label||vn).join(', ')}) {unmatched.length>1?'have':'has'} no load case assigned — auto-detection looks for a load case name containing the vehicle name. Select one below to include it in the rating table.
+                        </div>
+                      )}
+                      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(280px,1fr))',gap:'8px'}}>
+                        {selVeh.map(vn=>{
+                          const veh = ALL_VEHICLES.find(v=>v.name===vn);
+                          const assign = vehicleLCMap[vn]||{};
+                          const hasPos = !!assign.posLC;
+                          return (
+                            <div key={vn} style={{display:'flex',alignItems:'center',gap:'6px',padding:'5px 8px',
+                              borderRadius:'5px',background:hasPos?'#f0fdf4':'#fffbeb',
+                              border:`1px solid ${hasPos?'#bbf7d0':'#fde68a'}`}}>
+                              <div style={{flex:'0 0 90px',fontSize:'10.5px',fontWeight:'600',color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}
+                                title={veh?.label||vn}>{veh?.label||vn}</div>
+                              <select value={assign.posLC||''}
+                                onChange={e=>setVehicleLCMap(prev=>({...prev,[vn]:{...(prev[vn]||{}),posLC:e.target.value}}))}
+                                style={{...INP,fontSize:'10.5px',fontFamily:'monospace',flex:1,
+                                  borderColor:hasPos?'#bbf7d0':'#fde68a',background:hasPos?'#fff':'#fffbeb'}}>
+                                <option value="">— select load case —</option>
+                                {lcNames.map(n=><option key={n} value={n}>{n}</option>)}
+                              </select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af',marginTop:'6px'}}>
+                        {matched.length} of {selVeh.length} vehicles assigned · shear load case is auto-derived (max/min → all)
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Multi-vehicle table */}
-                {aremaMultiData.length>0&&(
+                {aremaMultiData.length>0?(
                 <div style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px',overflowX:'auto'}}>
                   <div style={{fontSize:'11px',fontWeight:'600',color:'#374151',marginBottom:'8px'}}>🚛 Multi-Vehicle AREMA ASD Rating</div>
                   <table style={{borderCollapse:'collapse',fontSize:'10.5px',fontFamily:'monospace',width:'100%',minWidth:'540px'}}>
@@ -11691,9 +11738,14 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     </tbody>
                   </table>
                 </div>
-                )}
+                ):(hasAremaZone&&(cfg?.selectedVehicles?.length>0)?(
+                  <div style={{padding:'14px 16px',background:'#fffbeb',border:'1px dashed #fde68a',borderRadius:'8px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px'}}>
+                    🚛 <strong>Multi-Vehicle table empty</strong> — no selected vehicle has a load case assigned. Use the assignment dropdowns above to pick each vehicle's moving load case.
+                  </div>
+                ):null)}
                 {/* ── Node-by-Node Rating Tables ── */}
-                {aremaAsdData.length>0&&(()=>{
+                {aremaAsdData.length>0?(()=>{
                   const rfC  = rf=>rf!=null&&isFinite(rf)?(rf>=1?'#059669':rf>=0.5?'#d97706':'#dc2626'):'#9ca3af';
                   const f1   = v=>v!=null&&isFinite(v)?v.toFixed(1):'—';
                   const f3   = v=>v!=null&&isFinite(v)?v.toFixed(3):'—';
@@ -11739,19 +11791,26 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   // Vehicle color palette
                   const vehColors = ['#065f46','#1d4ed8','#7e22ce','#c2410c','#0369a1','#4d7c0f'];
                   const vehColor  = i => vehColors[i%vehColors.length];
-                  // Per-vehicle THdr2 groups for flexure (Normal/Max/Mod)
-                  const vehFlexGroups = (rfCkey,rfTkey,gKey) => tableVehicles.map((veh,i)=>({
+                  // Per-vehicle THdr2 groups for flexure (Normal/Max/Mod) — now includes Live Load moment + stress
+                  const vehFlexGroups = (rfCkey,rfTkey,gKey,denomLabel='denom_N') => tableVehicles.map((veh,i)=>({
                     label: veh.name||`Veh ${i+1}`,
-                    cols:  [rfCkey,rfTkey,gKey,'Rating'],
+                    cols:  [`${denomLabel} (ft-k)`,'fLL_top','fLL_bot',rfCkey,rfTkey,gKey,'Rating'],
                     bg:    vehColor(i)+'22', colBg: vehColor(i)+'11',
                     tc:    vehColor(i),
                   }));
-                  // Per-vehicle cells for flexure
-                  const vehFlexCells = (p,rfCkey,rfTkey,gKey) => tableVehicles.map((veh,i)=>{
+                  // Per-vehicle cells for flexure — Live Load moment/stress + RF
+                  const vehFlexCells = (p,rfCkey,rfTkey,gKey,denomKey='denomN') => tableVehicles.map((veh,i)=>{
                     const r=vRF(veh,p.pos);
                     const rc=r[rfCkey], rt=r[rfTkey], g=r[gKey];
+                    const dmv=r[denomKey];   // live-load denominator moment for this vehicle
                     const col=vehColor(i);
+                    const Sxtop=p.sec?.SxTopG, Sxbot=p.sec?.SxBotN;
+                    const fLLtop=(dmv!=null&&Sxtop)?(dmv*12/Sxtop).toFixed(2):'—';
+                    const fLLbot=(dmv!=null&&Sxbot)?(dmv*12/Sxbot).toFixed(2):'—';
                     return (<React.Fragment key={veh.name||i}>
+                      {TD(dmv!=null?f1(dmv):'—',{bg:col+'10'})}
+                      {TD(fLLtop,{bg:col+'10'})}
+                      {TD(fLLbot,{bg:col+'10'})}
                       {TD(f3(rc),{bg:col+'18',c:rfC(rc)})}
                       {TD(f3(rt),{bg:col+'18',c:rfC(rt)})}
                       {TD(f3(g), {bg:col+'30',fw:700,c:rfC(g)})}
@@ -11782,13 +11841,14 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   // Per-vehicle groups for fatigue
                   const vehFatGroups = () => tableVehicles.map((veh,i)=>({
                     label: veh.name||`Veh ${i+1}`,
-                    cols:  ['RF_Fat','Rating'],
+                    cols:  ['dM_fat (ft-k)','RF_Fat','Rating'],
                     bg:    vehColor(i)+'22', colBg: vehColor(i)+'11', tc: vehColor(i),
                   }));
                   const vehFatCells = (p) => tableVehicles.map((veh,i)=>{
                     const r=vRF(veh,p.pos);
                     const col=vehColor(i);
                     return (<React.Fragment key={veh.name||i}>
+                      {TD(r.dM_fat!=null?f1(r.dM_fat):'—',{bg:col+'10'})}
                       {TD(f3(r.rfFat),{bg:col+'30',fw:700,c:rfC(r.rfFat)})}
                       {TD(flt(r.rfFat)?(r.rfFat*eNum).toFixed(1):'—',{bg:col+'50',fw:700,c:rfC(r.rfFat)})}
                     </React.Fragment>);
@@ -11928,9 +11988,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <THdr2 bg="#f0fdf4" tc="#15803d" groups={[
                           {label:'Location',  cols:['Node','Pos (ft)'],                                              bg:'#f0fdf4'},
                           {label:'Dead Load', cols:[dlFactor!==1?`MDL×${dlFactor.toFixed(2)} (ft-k)`:'MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'], bg:'#fafff5',colBg:'#f0fdf4'},
-                          {label:'Live Load (E-80)', cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],       bg:'#eff6ff',colBg:'#dbeafe'},
                           {label:'Capacity',  cols:['Mc_N (ft-k)','Fb_N (ksi)','Mt_N (ft-k)','Ft_N (ksi)'],        bg:'#f9fafb',colBg:'#f3f4f6'},
-                          ...vehFlexGroups('RF_comp_N','RF_tens_N','RF_N ★'),
+                          ...vehFlexGroups('RF_comp_N','RF_tens_N','RF_N ★','denom_N'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11940,14 +11999,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(f1(p.MDL))}
                             {TD(fS(p.MDL,p.sec?.SxTopG))}
                             {TD(fS(p.MDL,p.sec?.SxBotN))}
-                            {TD(f1(p.denomN),{bg:'#dbeafe'})}
-                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#dbeafe'})}
-                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#dbeafe'})}
                             {TD(f1(p.McN),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Fb_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtN),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_N?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {vehFlexCells(p,'rfcN','rftN','gN')}
+                            {vehFlexCells(p,'rfcN','rftN','gN','denomN')}
                           </>);
                         })}
                         </tbody>
@@ -11969,9 +12025,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <THdr2 bg="#fff7ed" tc="#c2410c" groups={[
                           {label:'Location',        cols:['Node','Pos (ft)'],                                   bg:'#fff7ed'},
                           {label:'Dead Load',       cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],       bg:'#fefce8',colBg:'#fff7ed'},
-                          {label:'Live Load (E-80)',cols:['denom_N (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],   bg:'#fff1e6',colBg:'#fed7aa'},
                           {label:'Capacity',        cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          ...vehFlexGroups('RF_comp_X','RF_tens_X','RF_X ★'),
+                          ...vehFlexGroups('RF_comp_X','RF_tens_X','RF_X ★','denom_N'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -11981,14 +12036,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(f1(p.MDL))}
                             {TD(fS(p.MDL,p.sec?.SxTopG))}
                             {TD(fS(p.MDL,p.sec?.SxBotN))}
-                            {TD(f1(p.denomN),{bg:'#fed7aa'})}
-                            {TD(fS(p.denomN,p.sec?.SxTopG),{bg:'#fed7aa'})}
-                            {TD(fS(p.denomN,p.sec?.SxBotN),{bg:'#fed7aa'})}
                             {TD(f1(p.McX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {vehFlexCells(p,'rfcX','rftX','gX')}
+                            {vehFlexCells(p,'rfcX','rftX','gX','denomN')}
                           </>);
                         })}
                         </tbody>
@@ -12008,9 +12060,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         <THdr2 bg="#fffbeb" tc="#92400e" groups={[
                           {label:'Location',        cols:['Node','Pos (ft)'],                                       bg:'#fffbeb'},
                           {label:'Dead Load',       cols:['MDL (ft-k)','fDL_top (ksi)','fDL_bot (ksi)'],           bg:'#fefce8',colBg:'#fffbeb'},
-                          {label:'Live Load (E-80)',cols:['denom_Mod (ft-k)','fLL_top (ksi)','fLL_bot (ksi)'],     bg:'#fef3c7',colBg:'#fde68a'},
                           {label:'Capacity',        cols:['Mc_X (ft-k)','Fb_X (ksi)','Mt_X (ft-k)','Ft_X (ksi)'], bg:'#f9fafb',colBg:'#f3f4f6'},
-                          ...vehFlexGroups('RF_comp_M','RF_tens_M','RF_M ★'),
+                          ...vehFlexGroups('RF_comp_M','RF_tens_M','RF_M ★','denom_Mod'),
                         ]}/>
                         <tbody>
                         {augmentedData.map(p=>{
@@ -12020,14 +12071,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                             {TD(f1(p.MDL))}
                             {TD(fS(p.MDL,p.sec?.SxTopG))}
                             {TD(fS(p.MDL,p.sec?.SxBotN))}
-                            {TD(f1(p.denomMod),{bg:'#fde68a'})}
-                            {TD(fS(p.denomMod,p.sec?.SxTopG),{bg:'#fde68a'})}
-                            {TD(fS(p.denomMod,p.sec?.SxBotN),{bg:'#fde68a'})}
                             {TD(f1(p.McX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Fb_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
                             {TD(f1(p.MtX),{bg:'#f3f4f6'})}
                             {TD(p.allo?.Ft_X?.toFixed(2)??'—',{bg:'#f3f4f6',fw:700})}
-                            {vehFlexCells(p,'rfcM','rftM','gM')}
+                            {vehFlexCells(p,'rfcM','rftM','gM','denomMod')}
                           </>);
                         })}
                         </tbody>
@@ -12078,8 +12126,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'540px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#faf5ff" tc="#7e22ce" groups={[
                           {label:'Location',   cols:['Node','Pos (ft)'],                          bg:'#faf5ff'},
-                          {label:'Live Load (E-80)', cols:['dM_fat (ft-k)','Sx_bot_net (in³)'],  bg:'#f3e8ff',colBg:'#e9d5ff'},
-                          {label:'Capacity',         cols:['Mf = SFT×Sx/12 (ft-k)','⚠'],          bg:'#faf5ff',colBg:'#f3e8ff'},
+                          {label:'Capacity',         cols:['Sx_bot_net (in³)','Mf = SFT×Sx/12 (ft-k)','⚠'],          bg:'#faf5ff',colBg:'#f3e8ff'},
                           ...vehFatGroups(),
                         ]}/>
                         <tbody>
@@ -12088,8 +12135,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                           const isCalcX=!!p._isCalcX;
                           const cap=p.sec?_aremaParams.SFT*p.sec.SxBotN/12:null;
                           return mkRow(p,isG,isCalcX,<>
-                            {TD(f1(p.dM_fat??p.dM),{bg:'#e9d5ff'})}
-                            {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#e9d5ff'})}
+                            {TD(p.sec?.SxBotN.toFixed(2)||'—',{bg:'#f3e8ff'})}
                             {TD(f1(cap),{bg:'#f3e8ff'})}
                             {TD(p.fatAlphaFlag?'⚠ SR>12':'',{c:'#dc2626',fw:700})}
                             {vehFatCells(p)}
@@ -12101,9 +12147,17 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     </>, '#d8b4fe','fatigue')}
                   </div>
                   );
-                })()}
-
-                {/* ── RF Envelope Chart — Plotly ── */}
+                })():(hasAremaZone?(
+                  <div style={{padding:'14px 16px',background:'#fffbeb',border:'1px dashed #fde68a',borderRadius:'8px',
+                    fontSize:'11px',fontFamily:'monospace',color:'#92400e',marginBottom:'12px',lineHeight:'1.6'}}>
+                    📋 <strong>Breakdown of Ratings empty</strong> — to display the node-by-node tables, all of the following are needed:
+                    <div style={{marginTop:'5px',paddingLeft:'14px'}}>
+                      • A <strong>Live Load (LL) case</strong> selected above {aremaLlLC?<span style={{color:'#059669'}}>✓ {aremaLlLC}</span>:<span style={{color:'#dc2626'}}>✗ not set</span>}<br/>
+                      • Analysis rows present {origRows.length>0?<span style={{color:'#059669'}}>✓ {origRows.length} rows</span>:<span style={{color:'#dc2626'}}>✗ none</span>}<br/>
+                      • The LL case name must match a load in the data{aremaLlLC&&!origRows.some(r=>r.load===aremaLlLC)?<span style={{color:'#dc2626'}}> ✗ "{aremaLlLC}" not found in results</span>:aremaLlLC?<span style={{color:'#059669'}}> ✓ matched</span>:''}
+                    </div>
+                  </div>
+                ):null)}
                 {aremaAsdData.length>1&&(
                   <div style={{marginBottom:'12px',border:'1px solid #e5e7eb',borderRadius:'8px',overflow:'hidden'}}>
                     <div style={{padding:'7px 14px',background:'#f8fafc',borderBottom:'1px solid #e5e7eb',
