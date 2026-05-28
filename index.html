@@ -364,6 +364,11 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
   const R2 = cfg?.rating || {};  // rating config shorthand
   const aremaApplyLoss = cfg?.aremaSection?.applyLoss === true;  // derived from cfg
   const f = (v,d=2)=>v!=null&&isFinite(v)?Number(v).toFixed(d):'—';
+  // LaTeX → HTML string (pre-rendered using the already-loaded KaTeX in the parent window)
+  const tex = (latex, display=false) => {
+    try { return window.katex ? window.katex.renderToString(String(latex), {throwOnError:false, displayMode:display, output:'html'}) : String(latex); }
+    catch(e) { return String(latex); }
+  };
   const rfC = rf=>rf>=1?'#15803d':rf>=0.5?'#d97706':'#dc2626';
   const rfLbl = rf=>isFinite(rf)?(rf>=1?'PASS':'FAIL'):'—';
   const today = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
@@ -462,16 +467,16 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
     <table style="width:100%;border-collapse:collapse;margin-bottom:8px">
       <colgroup><col style="width:38%"><col style="width:40%"><col style="width:22%"></colgroup>
       <tbody>
-      ${Row('Compression capacity','F_b × S_x_top / 12 = '+f(mc/s.SxTopG*12,2)+'×'+f(s.SxTopG,2)+'/12',f(mc)+' ft-k',{bg:caseBg})}
-      ${Row('Tension capacity','F_t × S_x_bot_net / 12 = '+f(mt/s.SxBotN*12,2)+'×'+f(s.SxBotN,2)+'/12',f(mt)+' ft-k',{bg:caseBg})}
-      ${Row('Shear capacity','F_s × A_w = '+f(vn/s.Aw,2)+'×'+f(s.Aw,3),f(vn)+' kips',{bg:caseBg})}
-      ${Row('Dead load moment MDL','from DC load case × DL factor '+f(ap.dlFactor,2),f(p.MDL)+' ft-k'+(ap.dlFactor!==1?' [×'+f(ap.dlFactor,2)+' applied]':''))}
-      ${Row('Live load moment MLL (unfactored)','from LL load case',f(p.MLL)+' ft-k')}
-      ${Row('Factored LL: dM = MLL×(1+I)×DF×(1+CF)',f(p.MLL)+'×'+f(ap.f1pI,3)+'×'+ap.DF+'×'+f(1+(ap.CF_factor||0),4),f(p.dM)+' ft-k')}
-      ${Row('Moment denominator','dM + lateral effects',f(denom)+' ft-k',{bg:'#f9fafb',bold:true})}
-      ${Row('RF_comp = (Mc − MDL) / denom','('+f(mc)+' − '+f(p.MDL)+') / '+f(denom),f(rfC_,3),{bg:govCtrl==='Comp'?caseBg:'',color:rfC(rfC_),bold:govCtrl==='Comp'})}
-      ${Row('RF_tens = (Mt − MDL) / denom','('+f(mt)+' − '+f(p.MDL)+') / '+f(denom),f(rft_,3),{bg:govCtrl==='Tens'?caseBg:'',color:rfC(rft_),bold:govCtrl==='Tens'})}
-      ${Row('RF_shear = (Vn − VDL) / dV_denom','('+f(vn)+' − '+f(p.VDL)+') / '+f(dV_denom),f(rfv_,3),{bg:govCtrl==='Shear'?caseBg:'',color:rfC(rfv_),bold:govCtrl==='Shear'})}
+      ${Row(tex('M_c = \\frac{F_b\\,S_{x,top}}{12}'),tex('\\frac{'+f(mc/s.SxTopG*12,2)+'\\times '+f(s.SxTopG,2)+'}{12}'),f(mc)+' ft-k',{bg:caseBg})}
+      ${Row(tex('M_t = \\frac{F_t\\,S_{x,bot,net}}{12}'),tex('\\frac{'+f(mt/s.SxBotN*12,2)+'\\times '+f(s.SxBotN,2)+'}{12}'),f(mt)+' ft-k',{bg:caseBg})}
+      ${Row(tex('V_n = F_s\\,A_w'),tex(''+f(vn/s.Aw,2)+'\\times '+f(s.Aw,3)),f(vn)+' kips',{bg:caseBg})}
+      ${Row(tex('M_{DL}'),'from DC load case × DL factor '+f(ap.dlFactor,2),f(p.MDL)+' ft-k'+(ap.dlFactor!==1?' [×'+f(ap.dlFactor,2)+' applied]':''))}
+      ${Row(tex('M_{LL}\\ (\\text{unfactored})'),'from LL load case',f(p.MLL)+' ft-k')}
+      ${Row(tex('dM = M_{LL}(1+I)\\,DF\\,(1+CF)'),tex(''+f(p.MLL)+'\\times '+f(ap.f1pI,3)+'\\times '+ap.DF+'\\times '+f(1+(ap.CF_factor||0),4)),f(p.dM)+' ft-k')}
+      ${Row(tex('\\text{denom} = dM + \\text{lateral}'),'dM + lateral effects',f(denom)+' ft-k',{bg:'#f9fafb',bold:true})}
+      ${Row(tex('RF_{comp} = \\frac{M_c - M_{DL}}{\\text{denom}}'),tex('\\frac{'+f(mc)+' - '+f(p.MDL)+'}{'+f(denom)+'}'),f(rfC_,3),{bg:govCtrl==='Comp'?caseBg:'',color:rfC(rfC_),bold:govCtrl==='Comp'})}
+      ${Row(tex('RF_{tens} = \\frac{M_t - M_{DL}}{\\text{denom}}'),tex('\\frac{'+f(mt)+' - '+f(p.MDL)+'}{'+f(denom)+'}'),f(rft_,3),{bg:govCtrl==='Tens'?caseBg:'',color:rfC(rft_),bold:govCtrl==='Tens'})}
+      ${Row(tex('RF_{shear} = \\frac{V_n - V_{DL}}{dV}'),tex('\\frac{'+f(vn)+' - '+f(p.VDL)+'}{'+f(dV_denom)+'}'),f(rfv_,3),{bg:govCtrl==='Shear'?caseBg:'',color:rfC(rfv_),bold:govCtrl==='Shear'})}
       </tbody>
     </table>
     <div style="padding:6px 12px;background:${caseColor};color:#fff;display:inline-block;border-radius:4px;margin-bottom:12px;font-family:monospace;font-size:10pt">
@@ -516,6 +521,7 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
   ].join('\n    ');
   return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
   <title>AREMA Load Rating Report</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"/>
   <style>
     ${reportCSS}
   </style>
@@ -774,10 +780,9 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
     <colgroup><col style="width:38%"><col style="width:40%"><col style="width:22%"></colgroup>
     <thead><tr>${TH('Stress',{align:'left',bg:'#f0fdf4',color:'#15803d'})}${TH('Formula',{bg:'#f0fdf4',color:'#15803d'})}${TH('Value',{bg:'#f0fdf4',color:'#15803d'})}</tr></thead>
     <tbody>
-    ${Row('Tension Ft_N = 0.55 × Fy','0.55 × '+allo.Fy+' ksi',f(allo.Ft_N,2)+' ksi',{bg:'#f0fdf4'})}
-    ${Row('Compression Fb_N (with LTB)','0.55Fy − (0.55Fy²/1.8×10⁶)×(L/r)² = '+f(allo.Ft_N,2)+' − '+f(allo.Fb_N_ltb,4),f(allo.Fb_N,2)+' ksi',{bg:'#f0fdf4'})}
-    ${Row('  LTB check: L/r_yc = '+f(allo.LRyc,2),'(0.55×'+allo.Fy+'²/1.8×10⁶)×'+f(allo.LRyc,2)+'² = ',f(allo.Fb_N_ltb,4)+' ksi reduction',{})}
-    ${Row('Shear Fs_N = 0.35 × Fy','0.35 × '+allo.Fy+' ksi',f(allo.Fs_N,2)+' ksi',{bg:'#f0fdf4'})}
+    ${Row(tex('F_{t,N} = 0.55\\,F_y'),tex('0.55 \\times '+allo.Fy+' = '+f(allo.Ft_N,2)+'\\ \\text{ksi}'),f(allo.Ft_N,2)+' ksi',{bg:'#f0fdf4'})}
+    ${Row(tex('F_{b,N} = 0.55F_y - \\frac{0.55F_y^2}{1.8\\times10^6}\\left(\\tfrac{L}{r_{yc}}\\right)^2'),tex(''+f(allo.Ft_N,2)+' - '+f(allo.Fb_N_ltb,4)+'\\ \\ (L/r_{yc}='+f(allo.LRyc,2)+')'),f(allo.Fb_N,2)+' ksi',{bg:'#f0fdf4'})}
+    ${Row(tex('F_{s,N} = 0.35\\,F_y'),tex('0.35 \\times '+allo.Fy+' = '+f(allo.Fs_N,2)+'\\ \\text{ksi}'),f(allo.Fs_N,2)+' ksi',{bg:'#f0fdf4'})}
     </tbody>
   </table>
   ${Sub('3.2 Maximum &amp; Modified — AREMA Table 15-7-1  ·  K = 0.80Fy',{color:'#92400e'})}
@@ -785,10 +790,10 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
     <colgroup><col style="width:38%"><col style="width:40%"><col style="width:22%"></colgroup>
     <thead><tr>${TH('Stress',{align:'left',bg:'#fffbeb',color:'#92400e'})}${TH('Formula',{bg:'#fffbeb',color:'#92400e'})}${TH('Value',{bg:'#fffbeb',color:'#92400e'})}</tr></thead>
     <tbody>
-    ${Row('K factor','0.80 × Fy = 0.80 × '+allo.Fy,f(allo.K,2)+' ksi',{bg:'#fffbeb',bold:true})}
-    ${Row('Tension Ft_X = K','K = '+f(allo.K,2)+' ksi',f(allo.Ft_X,2)+' ksi',{bg:'#fef3c7'})}
-    ${Row('Compression Fb_X = K − LTB','K − (K×Fy/1.8×10⁶)×(L/r)² = '+f(allo.K,2)+' − '+f(allo.Fb_X_ltb,4),f(allo.Fb_X,2)+' ksi',{bg:'#fef3c7'})}
-    ${Row('Shear Fs_X = 0.75 × K','0.75 × '+f(allo.K,2)+' ksi',f(allo.Fs_X,2)+' ksi',{bg:'#fef3c7'})}
+    ${Row(tex('K = 0.80\\,F_y'),tex('0.80 \\times '+allo.Fy+' = '+f(allo.K,2)+'\\ \\text{ksi}'),f(allo.K,2)+' ksi',{bg:'#fffbeb',bold:true})}
+    ${Row(tex('F_{t,X} = K'),tex('K = '+f(allo.K,2)+'\\ \\text{ksi}'),f(allo.Ft_X,2)+' ksi',{bg:'#fef3c7'})}
+    ${Row(tex('F_{b,X} = K - \\frac{K F_y}{1.8\\times10^6}\\left(\\tfrac{L}{r_{yc}}\\right)^2'),tex(f(allo.K,2)+' - '+f(allo.Fb_X_ltb,4)+'\\ \\ (L/r_{yc}='+f(allo.LRyc,2)+')'),f(allo.Fb_X,2)+' ksi',{bg:'#fef3c7'})}
+    ${Row(tex('F_{s,X} = 0.75\\,K'),tex('0.75 \\times '+f(allo.K,2)+' = '+f(allo.Fs_X,2)+'\\ \\text{ksi}'),f(allo.Fs_X,2)+' ksi',{bg:'#fef3c7'})}
     </tbody>
   </table>`:'<p style="color:#9ca3af">Section data not available — ensure AREMA library is configured in Step 3.</p>'}
 
@@ -940,9 +945,9 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
 
   ${govN?mkCalcDetail(govN,'8.2 Normal Rating (AREMA Table 15-1-11)','#15803d','#f0fdf4',
     govN.McN,govN.MtN,govN.VnN,govN.denomN,govN.dV_N,govN.govN,govN.rfcN,govN.rftN,govN.rfvN,govN.gN):''}
-  ${govX?mkCalcDetail(govX,'8.3 Maximum Rating (K-factor, denom=dM+CF)','#c2410c','#fff7ed',
+  ${govX?mkCalcDetail(govX,'8.3 Maximum Rating (K-factor, denom = dM)','#c2410c','#fff7ed',
     govX.McX,govX.MtX,govX.VnX,govX.denomN,govX.dV_N,govX.govX,govX.rfcX,govX.rftX,govX.rfvX,govX.gX):''}
-  ${govM?mkCalcDetail(govM,'8.4 Modified Rating (K-factor, all lateral in denom)','#92400e','#fffbeb',
+  ${govM?mkCalcDetail(govM,'8.4 Modified Rating (K-factor, wind+rock+long in denom)','#92400e','#fffbeb',
     govM.McX,govM.MtX,govM.VnX,govM.denomMod,govM.dV_mod,govM.govM,govM.rfcM,govM.rftM,govM.rfvM,govM.gM):''}
   ${govFat?`${Sub('8.5 Fatigue Rating — AREMA §1.7  ·  Cat '+ap.fatCat+'  ·  SFT='+ap.SFT+' ksi  ·  α='+ap.fatAlpha+'  ·  β='+ap.fatBeta,{color:'#7e22ce'})}
   <table style="border-collapse:collapse;width:100%;margin-bottom:10px">
