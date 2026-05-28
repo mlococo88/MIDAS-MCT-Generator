@@ -11078,19 +11078,14 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                       </div>
                       <div style={{color:'#9ca3af',fontSize:'7.5px',marginTop:'2px'}}>Not a separate lateral moment — M_rock = 0</div>
                     </div>
-                    {/* CF */}
-                    <div style={{padding:'6px 8px',background:curveDegree>0?'#fff7ed':'#f9fafb',border:`1px solid ${curveDegree>0?'#fdba74':'#e5e7eb'}`,borderRadius:'4px',fontSize:'8.5px',fontFamily:'monospace'}}>
-                      <div style={{color:curveDegree>0?'#c2410c':'#9ca3af',fontWeight:'700',marginBottom:'3px'}}>
-                        🔄 Centrifugal Force {curveDegree===0&&'(straight track)'}
+                    {/* CF — now shown in the Rocking, Centrifugal Force & Load Distribution Details panel (applies to all cases) */}
+                    <div style={{padding:'6px 8px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'4px',fontSize:'8.5px',fontFamily:'monospace',opacity:0.7}}>
+                      <div style={{color:'#6b7280',fontWeight:'700',marginBottom:'3px'}}>🔄 Centrifugal Force — applies to all cases</div>
+                      <div style={{color:'#9ca3af',fontSize:'7.5px'}}>AREMA §1.3.6 — see Rocking/CF Details panel above</div>
+                      <div style={{color:'#c2410c',fontWeight:'600',marginTop:'3px'}}>
+                        CF_factor = {CF_factor.toFixed(4)} → LL × {(1+CF_factor).toFixed(4)}
                       </div>
-                      <div style={{color:'#6b7280',fontSize:'7.5px',marginBottom:'2px'}}>AREMA §1.3.6 · Lateral force 8 ft above top of rail → overturning moment</div>
-                      {curveDegree>0?<>
-                        <div>C = 0.00117×{curveSpeed}²×{curveDegree} = <strong>{C.toFixed(4)}%</strong></div>
-                        <div>CF_factor = C×8×d_max/Ix = {C.toFixed(4)}×8×{d_max.toFixed(3)}/{Ix_grp.toFixed(3)} = <strong>{CF_factor.toFixed(4)}</strong></div>
-                        <div style={{color:'#c2410c',fontWeight:'700',marginTop:'2px'}}>
-                          Applied to all ratings: LL × (1 + CF_factor) — increases live load like impact
-                        </div>
-                      </>:<div style={STYLES.dimText}>CF_factor = 0 (no curvature)</div>}
+                      <div style={{color:'#9ca3af',fontSize:'7.5px',marginTop:'2px'}}>Not a lateral moment — increases live load like impact</div>
                     </div>
                   </div>
                   {/* Longitudinal placeholder */}
@@ -11581,9 +11576,15 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                   const Ix_grp = gd.reduce((s,d)=>s+d*d, 0);
                   const d_max = Math.max(...gd.map(Math.abs));
                   
-                  // Rocking impact
+                  // Rocking impact (AREMA §1.3.6): I_rock = 0.20 × gauge × d_max / I_x
                   const gauge = +(R2.arema_gauge ?? 56.5) / 12;
-                  const I_rock = 0.20 * gauge / spacings[0];
+                  const I_rock = (Ix_grp > 0) ? 0.20 * gauge * d_max / Ix_grp : 0;
+                  
+                  // Centrifugal force (AREMA §1.3.6): C = 0.00117×S²×D, CF_factor = C×8×d_max/Ix
+                  const cfSpeed  = +(R2.arema_curveSpeed ?? 60);
+                  const cfDegree = +(R2.arema_curveDegree ?? 0);
+                  const C_cf  = (cfDegree > 0) ? 0.00117 * cfSpeed * cfSpeed * cfDegree : 0;
+                  const CF_fac = (Ix_grp > 0 && C_cf > 0) ? C_cf * 8 * d_max / Ix_grp : 0;
                   
                   // Load distribution
                   const e_track = 0; // centered
@@ -11594,7 +11595,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     <div style={{background:'#f0f9ff',border:'1px solid #0369a1',borderRadius:'8px',padding:'12px 16px',marginBottom:'12px'}}>
                       <div style={{display:'flex',alignItems:'center',gap:'8px',cursor:'pointer',marginBottom:showRocking?'12px':'0'}}
                         onClick={()=>setShowRocking(!showRocking)}>
-                        <span style={{fontSize:'11px',fontWeight:'600',color:'#0369a1'}}>📐 Rocking Effects & Load Distribution Details</span>
+                        <span style={{fontSize:'11px',fontWeight:'600',color:'#0369a1'}}>📐 Rocking, Centrifugal Force & Load Distribution Details</span>
                         <span style={{fontSize:'10px',color:'#0369a1'}}>({showRocking?'▼':'▶'})</span>
                       </div>
                       
@@ -11617,10 +11618,25 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                         {/* Rocking Impact */}
                         <div style={{background:'#fff',border:'1px solid #0369a1',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
                           <div style={{fontWeight:'600',color:'#0369a1',marginBottom:'8px'}}>Rocking Impact (AREMA §1.3.6)</div>
-                          <div style={{marginBottom:'6px'}}>Equation: I<sub>rock</sub> = 0.20 × gauge<sub>ft</sub> / S<sub>1</sub></div>
-                          <div style={{marginBottom:'6px'}}>gauge = {gauge.toFixed(4)} ft (standard: 4.71 ft / 12)</div>
-                          <div style={{marginBottom:'6px'}}>S<sub>1</sub> = {spacings[0].toFixed(2)} ft (first spacing)</div>
+                          <div style={{marginBottom:'6px'}}>Equation: I<sub>rock</sub> = 0.20 × gauge<sub>ft</sub> × d<sub>max</sub> / I<sub>x</sub></div>
+                          <div style={{marginBottom:'6px'}}>gauge = {gauge.toFixed(4)} ft (standard: 56.5 in / 12)</div>
+                          <div style={{marginBottom:'6px'}}>d<sub>max</sub> = {d_max.toFixed(3)} ft · I<sub>x</sub> = {Ix_grp.toFixed(3)} ft²</div>
+                          <div style={{marginBottom:'6px'}}>I<sub>rock</sub> = 0.20 × {gauge.toFixed(4)} × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)}</div>
                           <div style={{fontWeight:'600',color:'#0369a1'}}>I<sub>rock</sub> = {(I_rock*100).toFixed(3)}% (added to impact factor)</div>
+                        </div>
+                        
+                        {/* Centrifugal Force */}
+                        <div style={{background:'#fff',border:'1px solid #c2410c',borderRadius:'4px',padding:'10px',marginBottom:'10px'}}>
+                          <div style={{fontWeight:'600',color:'#c2410c',marginBottom:'8px'}}>Centrifugal Force (AREMA §1.3.6){cfDegree===0&&<span style={{fontWeight:'400',color:'#9ca3af'}}> — straight track</span>}</div>
+                          <div style={{marginBottom:'6px'}}>Lateral force applied 8 ft above top of rail → overturning moment, distributed by rigid body rotation</div>
+                          <div style={{marginBottom:'6px'}}>Equation: C = 0.00117 × S² × D (centrifugal factor, %)</div>
+                          <div style={{marginBottom:'6px'}}>S = {cfSpeed} mph (design speed) · D = {cfDegree}° (degree of curve)</div>
+                          {cfDegree>0?<>
+                            <div style={{marginBottom:'6px'}}>C = 0.00117 × {cfSpeed}² × {cfDegree} = {C_cf.toFixed(4)}%</div>
+                            <div style={{marginBottom:'6px'}}>Equation: CF<sub>factor</sub> = C × 8 × d<sub>max</sub> / I<sub>x</sub></div>
+                            <div style={{marginBottom:'6px'}}>CF<sub>factor</sub> = {C_cf.toFixed(4)} × 8 × {d_max.toFixed(3)} / {Ix_grp.toFixed(3)}</div>
+                            <div style={{fontWeight:'600',color:'#c2410c'}}>CF<sub>factor</sub> = {CF_fac.toFixed(4)} → live load × {(1+CF_fac).toFixed(4)} (all cases, like impact)</div>
+                          </>:<div style={{fontWeight:'600',color:'#9ca3af'}}>CF<sub>factor</sub> = 0 (D = 0, no curvature)</div>}
                         </div>
                         
                         {/* Load Distribution */}
