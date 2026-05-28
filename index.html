@@ -6787,7 +6787,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const ballastDeck = R2.arema_ballast ?? false;
     const ballastF    = ballastDeck ? 0.9 : 1.0;   // AREMA §1.3.5: 0.9 factor for ballast deck
     const iBase       = impAuto ? iAuto : impMan;
-    // Note: f1pI computed below after S_gird is known (rocking addition depends on girder spacing)
+    // Note: f1pI computed below after girder geometry is known (rocking depends on d_max and Ix_grp)
 
     // ── Bridge cross-section geometry ──────────────────────────────────────
     const n_gird  = Math.max(2, Math.round(+(R2.arema_n      ?? 2)));   // number of girders
@@ -6811,11 +6811,6 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     
     const h_rail  = Math.max(0,   +(R2.arema_h_rail ?? 1.5));          // top of rail above top flange (ft)
 
-    // Rocking impact addition (AREMA §1.3.6): applied as impact, not lateral moment
-    // I_rock = 0.20 × gauge_ft / girder_spacing  (dimensionless, added to impact)
-    const I_rock  = (S_gird>0) ? 0.20 * (gauge/12) / S_gird : 0;
-    const f1pI    = 1 + ballastF * (iBase + I_rock); // total (1+I): ballast factor applies to both impact and rocking
-
     // Girder group: calculate actual positions from spacings array
     // spacings = [space1, space2, space3, ...] (one less than number of girders)
     const gPos = (() => {
@@ -6829,6 +6824,12 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const gd      = gPos.map(p => p - gCent);           // eccentricities (ft)
     const Ix_grp  = gd.reduce((s,d)=>s+d*d, 0);        // Σd² (ft²)
     const d_max   = Math.max(...gd.map(Math.abs));       // governing eccentricity (ft)
+
+    // Rocking impact addition (AREMA §1.3.6): applied as impact, not lateral moment
+    // I_rock = 0.20 × gauge × d_max / I_x  (dimensionless, added to impact)
+    const gauge_ft = gauge / 12;
+    const I_rock  = (Ix_grp > 0) ? 0.20 * gauge_ft * d_max / Ix_grp : 0;
+    const f1pI    = 1 + ballastF * (iBase + I_rock); // total (1+I): ballast factor applies to both impact and rocking
 
     // ── AREMA-specified heights above top of rail ───────────────────────────
     // (code values — not user input)
@@ -6845,9 +6846,8 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     const M_wind  = q_wind * span * span / 8;    // ft-kips
 
     // ── Rocking: now treated as additional impact, not lateral moment ─────────
-    // I_rock = 0.20 × gauge_ft / S_gird (computed above, added to f1pI)
+    // I_rock = 0.20 × gauge × d_max / I_x (computed above, added to f1pI)
     // No separate M_rock in the lateral effects denominator.
-    const gauge_ft = gauge / 12;
     const R_rock   = 0;   // rocking moment removed from lateral — now in f1pI
     const M_rock   = 0;   // rocking handled via I_rock impact addition
 
