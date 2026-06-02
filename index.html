@@ -7000,13 +7000,18 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const llp_v_try = llLC_shear ? nvA(llLC_shear, node) : null;  // try the (all) envelope case
       const llp_v = llp_v_try || llp;   // fall back to regular LL case if (all) envelope doesn't exist in data
       const lln_v = (llLC_shear && llNegLC) ? (nvA(llNegLC, node) || llp_v) : llp_v;  // both directions if available
+      // Robust shear: the moment-envelope case often carries only concurrent (≈0) shear,
+      // so search across every related LL case (shear-variant, positive, negative) and take the max |V|.
+      const _shearCands = [...new Set([llLC_shear, llLC, llNegLC].filter(Boolean))];
+      let _VLLshear = 0;
+      for (const _lc of _shearCands) { const _v = nvA(_lc, node); if (_v) _VLLshear = Math.max(_VLLshear, Math.abs(_v.shearZ||0)); }
       const longp = nvA(longLC, node);
       if (!llp) return null;
 
       const MDL = Math.abs(dc?.momentY||0) * dlFactor;   // DL factor accounts for unknown elements
       const VDL = (dc?.shearZ||0) * dlFactor;
       const MLL = Math.max(0, llp?.momentY||0);
-      const VLL = Math.max(Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
+      const VLL = Math.max(_VLLshear, Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
 
       // Longitudinal from selected MIDAS LC — scaled by span multiplier
       const M_long_node = longp ? Math.abs(longp.momentY||0) * long_mult : 0;
@@ -7112,16 +7117,22 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const llp = nodeValsA(origRows,veh.posLC,node);
         const lln = veh.negLC ? nodeValsA(origRows,veh.negLC,node) : llp;
         // For shear: use THIS VEHICLE'S "(all)" envelope case if it exists, else fall back to posLC/negLC
-        const llp_v_try = nodeValsA(origRows, veh.posLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node);
+        const _allVar = s=>s?s.replace(/\(max\)/i,'(all)').replace(/\(min\)/i,'(all)'):s;
+        const llp_v_try = nodeValsA(origRows, _allVar(veh.posLC), node);
         const llp_v = llp_v_try || llp;   // fall back to posLC data if (all) variant absent
-        const lln_v_try = veh.negLC ? nodeValsA(origRows, veh.negLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node) : null;
+        const lln_v_try = veh.negLC ? nodeValsA(origRows, _allVar(veh.negLC), node) : null;
         const lln_v = lln_v_try || lln || llp_v;
+        // Robust shear: search every related case (all-variant, posLC, negLC) for the max |V|,
+        // because a moment-envelope case often only carries concurrent (≈0) shear.
+        const _shearCands = [...new Set([_allVar(veh.posLC), veh.posLC, veh.negLC, _allVar(veh.negLC)].filter(Boolean))];
+        let _VLLshear = 0;
+        for (const _lc of _shearCands) { const _v = nodeValsA(origRows, _lc, node); if (_v) _VLLshear = Math.max(_VLLshear, Math.abs(_v.shearZ||0)); }
         if (!llp) return null;
 
         const MDL = Math.abs(dc?.momentY||0) * dlFactor;   // DL factor
         const VDL = (dc?.shearZ||0) * dlFactor;
         const MLL = Math.max(0, llp?.momentY||0);
-        const VLL = Math.max(Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
+        const VLL = Math.max(_VLLshear, Math.abs(llp_v?.shearZ||0), Math.abs(lln_v?.shearZ||0));
 
         const cfMult = 1 + (CF_factor || 0);
         const dM = MLL>0.001 ? MLL*f1pI*DF*cfMult : null;
