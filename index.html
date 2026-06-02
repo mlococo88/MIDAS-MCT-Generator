@@ -6950,7 +6950,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
 
     return {span,impAuto,impMan,DF,gauge,axle,eNum,dcLC,llLC,llLC_shear,llNegLC,longLC,iAuto,iBase,I_rock,CF_factor,ballastDeck,ballastF,f1pI,
             n_gird,S_gird,h_rail,Ix_grp,d_max,H_wind,gauge_ft,
-            q_wind,R_rock,V_rock_lat,
+            q_wind,R_rock,V_wind_lat,V_rock_lat,
             M_wind,M_brake,M_tract,M_long,M_rock,M_CF,M_extra,M_mod,M_lat,
             longLC,long_L_ref,F_brake_act,F_tract_act,F_long_act,long_governs_act,
             F_brake_ref,F_tract_ref,F_long_ref,long_mult,
@@ -6962,7 +6962,7 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
     return {span:50,impAuto:true,impMan:0.25,DF:0.5,gauge:56.5,axle:40,eNum:80,
             dcLC:'',llLC:'',llLC_shear:'',llNegLC:'',longLC:'',iAuto:0,iBase:0,I_rock:0,CF_factor:0,
             ballastDeck:false,ballastF:1,f1pI:1,n_gird:2,S_gird:6,h_rail:1.5,Ix_grp:0,d_max:0,H_wind:9.5,gauge_ft:4.708,
-            q_wind:0,R_rock:0,V_rock_lat:0,M_wind:0,M_brake:0,M_tract:0,M_long:0,M_rock:0,M_CF:0,M_extra:0,M_mod:0,M_lat:0,
+            q_wind:0,R_rock:0,V_wind_lat:0,V_rock_lat:0,M_wind:0,M_brake:0,M_tract:0,M_long:0,M_rock:0,M_CF:0,M_extra:0,M_mod:0,M_lat:0,
             long_L_ref:0,F_brake_act:0,F_tract_act:0,F_long_act:0,long_governs_act:'',
             F_brake_ref:0,F_tract_ref:0,F_long_ref:0,long_mult:0,e_track:0,DF_calc:0.5,
             curveSpeed:60,curveDegree:0,C:0,H_CF:8,fatCat:'D',SFT:6,fatAlpha:0.85,fatBeta:0.15,I_fat:1,dlFactor:1};
@@ -7001,8 +7001,10 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const llp_v = llp_v_try || llp;   // fall back to regular LL case if (all) envelope doesn't exist in data
       const lln_v = (llLC_shear && llNegLC) ? (nvA(llNegLC, node) || llp_v) : llp_v;  // both directions if available
       // Robust shear: the moment-envelope case often carries only concurrent (≈0) shear,
-      // so search across every related LL case (shear-variant, positive, negative) and take the max |V|.
-      const _shearCands = [...new Set([llLC_shear, llLC, llNegLC].filter(Boolean))];
+      // so find EVERY load case sharing the LL base name (any (max)/(min)/(all) suffix) and take max |V|.
+      const _stripSfx = s => s ? s.replace(/\s*\((max|min|all)\)\s*$/i,'').trim() : s;
+      const _baseLL = _stripSfx(llLC);
+      const _shearCands = [...new Set(origRows.map(r=>r.load).filter(l=>l && _stripSfx(l)===_baseLL))];
       let _VLLshear = 0;
       for (const _lc of _shearCands) { const _v = nvA(_lc, node); if (_v) _VLLshear = Math.max(_VLLshear, Math.abs(_v.shearZ||0)); }
       const longp = nvA(longLC, node);
@@ -7122,9 +7124,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const llp_v = llp_v_try || llp;   // fall back to posLC data if (all) variant absent
         const lln_v_try = veh.negLC ? nodeValsA(origRows, _allVar(veh.negLC), node) : null;
         const lln_v = lln_v_try || lln || llp_v;
-        // Robust shear: search every related case (all-variant, posLC, negLC) for the max |V|,
+        // Robust shear: find EVERY load case sharing the vehicle's base name (any suffix) and take max |V|,
         // because a moment-envelope case often only carries concurrent (≈0) shear.
-        const _shearCands = [...new Set([_allVar(veh.posLC), veh.posLC, veh.negLC, _allVar(veh.negLC)].filter(Boolean))];
+        const _stripSfx = s => s ? s.replace(/\s*\((max|min|all)\)\s*$/i,'').trim() : s;
+        const _baseV = _stripSfx(veh.posLC);
+        const _shearCands = [...new Set(origRows.map(r=>r.load).filter(l=>l && _stripSfx(l)===_baseV))];
         let _VLLshear = 0;
         for (const _lc of _shearCands) { const _v = nodeValsA(origRows, _lc, node); if (_v) _VLLshear = Math.max(_VLLshear, Math.abs(_v.shearZ||0)); }
         if (!llp) return null;
@@ -12148,7 +12152,13 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
                     {/* ── Table 4: Shear ── */}
                     {wrap(<>
                       <SecHdr icon="✂" title="SHEAR — All Cases" color="#374151" bg="#f9fafb"
-                        sub={`Vn_N = Fs_N×Aw · Vn_X = Fs_X×Aw · RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF×(1+CF)`}/>
+                        sub={`RF = (Vn − VDL) / dV · dV = VLL×(1+I)×DF×(1+CF) · LL shear searched from: ${(()=>{
+                          const strip=s=>s?s.replace(/\s*\((max|min|all)\)\s*$/i,'').trim():s;
+                          const base=strip(aremaLlLC);
+                          const cands=[...new Set(origRows.map(r=>r.load).filter(l=>l&&strip(l)===base))];
+                          let mx=0; cands.forEach(lc=>origRows.filter(r=>r.load===lc).forEach(r=>{mx=Math.max(mx,Math.abs(r.shearZ||0));}));
+                          return (cands.length?cands.join(', '):'(none)')+` → max |V| = ${mx.toFixed(1)} kip`;
+                        })()}`}/>
                       <div style={STYLES.fullScroll}>
                       <table style={{borderCollapse:'collapse',width:'100%',minWidth:'700px',fontSize:'9.5px',fontFamily:'monospace'}}>
                         <THdr2 bg="#f3f4f6" tc="#374151" groups={[
