@@ -6997,8 +6997,9 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
       const dc    = nvA(dcLC,  node);
       const llp   = nvA(llLC,  node);
       const lln   = llNegLC ? nvA(llNegLC, node) : llp;
-      const llp_v = llLC_shear ? nvA(llLC_shear, node) : nvA(llLC, node);  // Use shear LC if specified, otherwise use regular LL
-      const lln_v = llLC_shear && llNegLC ? nvA(llNegLC, node) : llp_v;  // For shear, use both directions if shear LC is set
+      const llp_v_try = llLC_shear ? nvA(llLC_shear, node) : null;  // try the (all) envelope case
+      const llp_v = llp_v_try || llp;   // fall back to regular LL case if (all) envelope doesn't exist in data
+      const lln_v = (llLC_shear && llNegLC) ? (nvA(llNegLC, node) || llp_v) : llp_v;  // both directions if available
       const longp = nvA(longLC, node);
       if (!llp) return null;
 
@@ -7110,9 +7111,11 @@ function StepResults({ cfg, set, setStep, rows: origRows, setRows, rawText, setR
         const dc  = dcLC ? nodeValsA(origRows,dcLC,node) : null;
         const llp = nodeValsA(origRows,veh.posLC,node);
         const lln = veh.negLC ? nodeValsA(origRows,veh.negLC,node) : llp;
-        // For shear: use THIS VEHICLE'S load case converted to "all" variant, not global selection
-        const llp_v = nodeValsA(origRows, veh.posLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node);
-        const lln_v = veh.negLC ? nodeValsA(origRows, veh.negLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node) : llp_v;
+        // For shear: use THIS VEHICLE'S "(all)" envelope case if it exists, else fall back to posLC/negLC
+        const llp_v_try = nodeValsA(origRows, veh.posLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node);
+        const llp_v = llp_v_try || llp;   // fall back to posLC data if (all) variant absent
+        const lln_v_try = veh.negLC ? nodeValsA(origRows, veh.negLC.replace(/\(max\)/i, '(all)').replace(/\(min\)/i, '(all)'), node) : null;
+        const lln_v = lln_v_try || lln || llp_v;
         if (!llp) return null;
 
         const MDL = Math.abs(dc?.momentY||0) * dlFactor;   // DL factor
