@@ -1905,6 +1905,32 @@ function AremaLibraryEditor({AS, setAS, totalLen, customRolledShapes = {}}) {
   const updLib = (idx, patch) =>
     setAS({sectionLibrary: library.map((s,i) => i===idx ? {...s,...patch} : s)});
 
+  // Duplicate an existing section as a new library entry (deep copy, new id/name)
+  const duplicateSection = (idx) => {
+    const src = library[idx];
+    if (!src) return;
+    const copy = JSON.parse(JSON.stringify(src));
+    copy.id = newId();
+    copy.name = (src.name || 'Section') + ' (copy)';
+    const newLib = [...library, copy];
+    setAS({sectionLibrary: newLib});
+    setEditIdx(newLib.length - 1);
+  };
+
+  // Copy geometry (components, out-to-out, Fy, holes, unbraced length) FROM another section INTO the current one.
+  // Section loss values are NOT copied — those are typically section-specific.
+  const copyGeomFrom = (srcIdx, destIdx) => {
+    const src = library[srcIdx];
+    if (!src || srcIdx===destIdx) return;
+    updLib(destIdx, {
+      aremaComps: JSON.parse(JSON.stringify(src.aremaComps || baseComps)),
+      outToOut: src.outToOut, Fy: src.Fy, unbracedL: src.unbracedL,
+      ryc: src.ryc, autoRyc: src.autoRyc,
+      holeDiam: src.holeDiam, holePitch: src.holePitch, holeGage: src.holeGage, holesInChain: src.holesInChain,
+      webHoleDiam: src.webHoleDiam, webHolePitch: src.webHolePitch, webHoleGage: src.webHoleGage, webHolesInChain: src.webHolesInChain,
+    });
+  };
+
   const updLibComp = (idx, cid, field, val) => {
     const comps = (library[idx]?.aremaComps || JSON.parse(JSON.stringify(baseComps)));
     const next  = comps.map(c => c.id===cid ? {...c,[field]:val} : c);
@@ -2194,11 +2220,26 @@ function AremaLibraryEditor({AS, setAS, totalLen, customRolledShapes = {}}) {
               borderRadius:'4px',color:'#dc2626',fontSize:'10px',cursor:'pointer'}}>
             🗑 Delete
           </button>
+          <button onClick={()=>duplicateSection(curIdx)}
+            style={{padding:'3px 10px',background:'#dbeafe',border:'1px solid #93c5fd',
+              borderRadius:'4px',color:'#1d4ed8',fontSize:'10px',cursor:'pointer',fontFamily:'monospace',fontWeight:'600'}}
+            title="Create a new section that is an exact copy of this one — then just tweak (e.g. cover plate thickness)">
+            📋 Duplicate
+          </button>
+          {library.length>1&&(
+            <select value="" onChange={e=>{ if(e.target.value!=='') copyGeomFrom(+e.target.value, curIdx); }}
+              style={{...INP,fontFamily:'monospace',fontSize:'10px',width:'auto',padding:'3px 6px'}}
+              title="Copy geometry (plates, dimensions, holes) from another section into this one. Section-loss values are not copied.">
+              <option value="">⤵ Copy geometry from…</option>
+              {library.map((s,i)=> i!==curIdx ? <option key={s.id} value={i}>{s.name||`Section ${i+1}`}</option> : null)}
+            </select>
+          )}
           <button onClick={()=>updLib(curIdx,{aremaComps:JSON.parse(JSON.stringify(baseComps)),
             outToOut:AS.outToOut,Fy:AS.Fy,unbracedL:AS.unbracedL})}
             style={{padding:'3px 10px',background:'#f3f4f6',border:'1px solid #d1d5db',
-              borderRadius:'4px',fontSize:'10px',cursor:'pointer',fontFamily:'monospace'}}>
-            ← Copy from base
+              borderRadius:'4px',fontSize:'10px',cursor:'pointer',fontFamily:'monospace'}}
+            title="Reset this section's geometry to the top-level default section (AS)">
+            ← Reset to base
           </button>
           {/* Bypass 0.85×gross floor — diagnostic checkbox */}
           <label style={{display:'flex',alignItems:'center',gap:'4px',cursor:'pointer',
