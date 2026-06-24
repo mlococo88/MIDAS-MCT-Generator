@@ -540,29 +540,36 @@ function buildPSBeamExport({cfg, origRows, nodePositions, isGFS, gfsMember, gfsM
     const base = stripSfx(requested);
     return allLoadNames.filter(l=>stripSfx(l)===base);
   };
-  const llCases = resolveLL(llPosLC);
-  // Fallback: if no LL case was selected in a rating tab (llPosLC empty) OR the
-  // requested case resolved to nothing in the data, auto-detect the moving-load cases.
-  // A moving-load case is any load name matching a selected vehicle, or carrying a
-  // (max)/(min)/(all) envelope suffix — these are the LL results from MIDAS.
-  let llCasesResolved = llCases.length ? llCases : (llPosLC ? [llPosLC] : []);
-  let llAutoDetected = false;
-  // AREMA/Cooper railroad cases are NOT valid for the HL-93-only PS-Beam tool
+  // ── Resolve the live load to the RAW HL-93 moving-load cases ──
+  // PS-Beam needs the unfactored LL envelope (truck/tandem (max)/(min)), NOT a
+  // load combination. A combo row (Strength I, Service III, etc.) is factored and
+  // already mixes DC+DW+LL — it must never be used as M_LL. So we:
+  //   1. reject any requested case that looks like a combination, and
+  //   2. always detect the moving-load cases directly from the data.
   const isAremaCase = l => /E\d{2}|AREMA|COOPER/i.test(l);
-  // Drop any AREMA case that slipped in via an explicit selection
-  llCasesResolved = llCasesResolved.filter(l=>!isAremaCase(l));
-  if (!llCasesResolved.length || !llCasesResolved.some(lc=>allLoadNames.includes(lc))) {
-    const vehicles = (cfg.selectedVehicles||[]);
-    const detected = allLoadNames.filter(l=>{
-      const hasSuffix = /\((max|min|all)\)\s*$/i.test(l);
-      const matchesVeh = vehicles.some(vn=>l.startsWith(vn));
-      const isDead = /^(selfweight|dc\d?|dw|dead)/i.test(l);
-      return (hasSuffix || matchesVeh) && !isDead && !isAremaCase(l);  // HL-93/highway only
-    });
+  const isComboRow = l => /STRENGTH|SERVICE|FATIGUE|\bSTR\b|\bSER\b|\bLRFD\b|COMB|LCB|CBS|\bDC\b|\bDW\b/i.test(l)
+                          && !/\((max|min|all)\)\s*$/i.test(l); // ...but keep MV envelope rows
+  const isMovingCase = l => {
+    const hasSuffix = /\((max|min|all)\)\s*$/i.test(l);         // MV envelope suffix
+    const matchesVeh = (cfg.selectedVehicles||[]).some(vn=>l.startsWith(vn));
+    const isDead = /^(selfweight|dc\d?|dw|dead)/i.test(l);
+    const isHL93 = /HL.?93|HS\d/i.test(l);
+    return (hasSuffix || matchesVeh) && !isDead && !isAremaCase(l) && (isHL93 || matchesVeh);
+  };
+
+  let llCasesResolved = [];
+  let llAutoDetected = false;
+  // If an explicit case was requested AND it's a genuine moving-load case (not a combo), use it.
+  const requestedRaw = resolveLL(llPosLC).filter(l=>!isAremaCase(l) && isMovingCase(l) && !isComboRow(l));
+  if (requestedRaw.length) {
+    llCasesResolved = requestedRaw;
+  } else {
+    // Otherwise detect the HL-93 moving-load cases directly from the pasted data.
+    const detected = allLoadNames.filter(l=>isMovingCase(l) && !isComboRow(l));
     if (detected.length) {
       const maxBranch = detected.filter(l=>/\(max\)/i.test(l));
       llCasesResolved = maxBranch.length ? maxBranch : detected;
-      llAutoDetected = true;
+      llAutoDetected = !!llPosLC;   // requested case wasn't usable → we auto-detected
     }
   }
   // Live-load family — PS-Beam only checks HL-93. Flag anything that isn't HL-93.
@@ -572,12 +579,12 @@ function buildPSBeamExport({cfg, origRows, nodePositions, isGFS, gfsMember, gfsM
   const llNotHL93 = !!(llCasesResolved.length && resFamily!=='HL-93');
   // Build the full set of cases backing the envelope: the resolved (positive)
   // cases plus their (min) siblings, so M_LLneg / V capture the negative branch.
-  // AREMA/Cooper cases are excluded — PS-Beam is HL-93 only.
+  // AREMA and combination (factored) rows are excluded — only raw HL-93 MV cases.
   const llEnvCases = (() => {
     const set = new Set(llCasesResolved);
     llCasesResolved.forEach(lc=>{
       const base = stripSfx(lc);
-      allLoadNames.forEach(l=>{ if(stripSfx(l)===base && !isAremaCase(l)) set.add(l); });
+      allLoadNames.forEach(l=>{ if(stripSfx(l)===base && !isAremaCase(l) && !isComboRow(l)) set.add(l); });
     });
     return [...set];
   })();
