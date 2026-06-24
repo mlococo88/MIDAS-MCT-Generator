@@ -1454,6 +1454,15 @@ function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings=
   </body></html>`;
 }
 
+// Strip characters MIDAS mojibakes (em/en dash, figure dash, minus sign, middot,
+// bullet, non-breaking space) → ASCII, so load CASE names round-trip cleanly.
+// Applied at MCT write time so output is bulletproof regardless of stored config.
+function cleanLCName(s){
+  return typeof s==='string'
+    ? s.replace(/[\u2010-\u2015\u2212]/g,'-').replace(/[\u00B7\u2022\u00A0]/g,' ').replace(/\s+/g,' ').trim()
+    : s;
+}
+
 function generateMCT(cfg) {
   const { projectUser,projectDate,version,spans,elemsPerSpan,materialGrade,
     section1Name,
@@ -1464,17 +1473,20 @@ function generateMCT(cfg) {
   // Ensure laneName has a default value (fix for MIDAS MCT import error)
   const safeLaneName = (laneName || '').trim() || 'Lane 1';
 
-  // Resolve dead loads — support both new deadLoads array and legacy fields
+  // Resolve dead loads — support both new deadLoads array and legacy fields.
+  // Names are ASCII-sanitized so they round-trip through MIDAS without mojibake.
   const deadLoads = (() => {
-    if (cfg.deadLoads && cfg.deadLoads.length) return cfg.deadLoads.filter(d=>d.value>0);
-    // Migrate legacy fields
-    const DLL = cfg.deadLoadLabels||{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'};
-    const out = [];
-    if (cfg.deckSlabLoad>0)  out.push({id:'dl_ds',name:DLL.deckSlab||'Deck Slab',type:'DC1',value:cfg.deckSlabLoad});
-    if (cfg.haunchLoad>0)    out.push({id:'dl_h', name:DLL.haunch||'Haunch',type:'DC1',value:cfg.haunchLoad});
-    if (cfg.diaphragmLoad>0) out.push({id:'dl_di',name:DLL.diaphragm||'Diaphragm',type:'DC1',value:cfg.diaphragmLoad});
-    if (cfg.barrierLoad>0)   out.push({id:'dl_b', name:DLL.barrier||'Movable Barrier',type:'DW',value:cfg.barrierLoad});
-    return out;
+    let out;
+    if (cfg.deadLoads && cfg.deadLoads.length) out = cfg.deadLoads.filter(d=>d.value>0);
+    else {
+      const DLL = cfg.deadLoadLabels||{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'};
+      out = [];
+      if (cfg.deckSlabLoad>0)  out.push({id:'dl_ds',name:DLL.deckSlab||'Deck Slab',type:'DC1',value:cfg.deckSlabLoad});
+      if (cfg.haunchLoad>0)    out.push({id:'dl_h', name:DLL.haunch||'Haunch',type:'DC1',value:cfg.haunchLoad});
+      if (cfg.diaphragmLoad>0) out.push({id:'dl_di',name:DLL.diaphragm||'Diaphragm',type:'DC1',value:cfg.diaphragmLoad});
+      if (cfg.barrierLoad>0)   out.push({id:'dl_b', name:DLL.barrier||'Movable Barrier',type:'DW',value:cfg.barrierLoad});
+    }
+    return out.map(d=>({...d, name:cleanLCName(d.name)}));
   })();
   const lines=[];
   const p=(...s)=>s.forEach(l=>lines.push(l));
@@ -1779,39 +1791,48 @@ function generateMCT(cfg) {
     const dwF  = +(combo.dwFactor  ?? combo.dcFactor ?? 1);
     const llF  = +(combo.llFactor  ?? 1);
     const kind = validKinds[combo.kind] || 'SERVICE';
-    let allParts = [];
+    const activeMVNames = new Set(activeVehicles.map(v=>`${v.name}_${safeLaneName}`));
+
+    // Separate the static (ST) parts from the moving-load (MV) parts. Multiple MV
+    // terms in ONE MIDAS combination are ADDED — but HL-93 truck and tandem must
+    // NOT be summed (they're an envelope). So we emit one combination PER vehicle,
+    // each carrying the same ST parts + a single MV term. Envelope them in MIDAS.
+    let stParts = [], mvParts = [];
 
     if (Array.isArray(combo.terms) && combo.terms.length > 0) {
       // Term-based: individual load cases with per-case factors
-      // Guard: only include ST terms whose load case was actually written to *STLDCASE,
-      // and MV terms whose vehicle case was actually written to *MVLDCASE.
-      const activeMVNames = new Set(activeVehicles.map(v=>`${v.name}_${safeLaneName}`));
-      allParts = combo.terms
-        .filter(t => t.lc && t.factor !== 0 && (
-          t.type === 'MV'
-            ? activeMVNames.has(t.lc)
-            : activeLCs.includes(t.lc)
-        ))
-        .map(t=>`${t.type==='MV'?'MV':'ST'}, ${t.lc}, ${t.factor}`);
+      combo.terms.forEach(t=>{
+        const lc=cleanLCName(t.lc);
+        if(!lc || t.factor===0) return;
+        if(t.type==='MV'){ if(activeMVNames.has(lc)) mvParts.push(`MV, ${lc}, ${t.factor}`); }
+        else if(activeLCs.includes(lc)) stParts.push(`ST, ${lc}, ${t.factor}`);
+      });
     } else {
       // Factor-based (AASHTO presets): apply global DC/DW/LL to all active LCs
-      const stParts = activeLCs
-        .map(lc=>{
-          const dl = deadLoads.find(d=>d.name===lc);
-          const f = dl?.type==='DW' ? dwF : dcF;
-          return {lc,f};
-        })
+      stParts = activeLCs
+        .map(lc=>{ const dl=deadLoads.find(d=>d.name===lc); return {lc, f: dl?.type==='DW'?dwF:dcF}; })
         .filter(({f})=>f!==0)
         .map(({lc,f})=>`ST, ${lc}, ${f}`);
-      const mvParts = llF!==0 && activeVehicles.length
+      mvParts = (llF!==0 && activeVehicles.length)
         ? activeVehicles.map(v=>`MV, ${v.name}_${safeLaneName}, ${llF}`)
         : [];
-      allParts = [...stParts, ...mvParts];
     }
 
-    if (!allParts.length) return;
-    p(`   NAME=${combo.name}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
-    p(`        ${allParts.join(', ')}`, ``);
+    if (mvParts.length > 1) {
+      // Split: one combination per vehicle (ST parts + that single MV term)
+      mvParts.forEach(mv=>{
+        const vehName = mv.split(',')[1].trim().replace(`_${safeLaneName}`,'');
+        const parts = [...stParts, mv];
+        if(!parts.length) return;
+        p(`   NAME=${cleanLCName(combo.name)} (${vehName}), STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+        p(`        ${parts.join(', ')}`, ``);
+      });
+    } else {
+      const allParts = [...stParts, ...mvParts];
+      if (!allParts.length) return;
+      p(`   NAME=${cleanLCName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+      p(`        ${allParts.join(', ')}`, ``);
+    }
   });
   p(`*ENDDATA`);
   return lines.join('\n');
@@ -2552,12 +2573,13 @@ function generateGFS_MCT(cfg) {
 
   // ── Static Load Cases ──
   const sl=g.staticLoads||{};
-  const swCase=sl.selfWeightCase||'Selfweight';
-  // Collect all entries across types with their member-type context
+  const swCase=cleanLCName(sl.selfWeightCase||'Selfweight');
+  // Collect all entries across types with their member-type context.
+  // loadCase names are ASCII-sanitized so they round-trip through MIDAS cleanly.
   const allLoadEntries=[
-    ...(sl.girderLoads||[]).map(e=>({...e,memberType:'girder'})),
-    ...(sl.floorbeamLoads||[]).map(e=>({...e,memberType:'floorbeam'})),
-    ...(sl.stringerLoads||[]).map(e=>({...e,memberType:'stringer'})),
+    ...(sl.girderLoads||[]).map(e=>({...e,loadCase:cleanLCName(e.loadCase),memberType:'girder'})),
+    ...(sl.floorbeamLoads||[]).map(e=>({...e,loadCase:cleanLCName(e.loadCase),memberType:'floorbeam'})),
+    ...(sl.stringerLoads||[]).map(e=>({...e,loadCase:cleanLCName(e.loadCase),memberType:'stringer'})),
   ];
   // Unique load case names
   const uniqueLCs=new Set();
@@ -2673,25 +2695,36 @@ function generateGFS_MCT(cfg) {
     p('*LOADCOMB    ; Combinations','; NAME=NAME, KIND, ACTIVE, bES, iTYPE, DESC, iSERV-TYPE, nLCOMTYPE, nSEISTYPE, LcomFactor');
     combos.forEach(combo=>{
       const kind = validKinds[combo.kind] || 'SERVICE';
-      let allParts = [];
+      let stParts = [], mvParts = [];
       if (Array.isArray(combo.terms) && combo.terms.length > 0) {
-        allParts = combo.terms
-          .filter(t => t.lc && t.factor !== 0 && (
-            t.type === 'MV' ? writtenMV.has(t.lc) : writtenST.has(t.lc)
-          ))
-          .map(t=>`${t.type==='MV'?'MV':'ST'}, ${t.lc}, ${t.factor}`);
+        combo.terms.forEach(t=>{
+          const lc=cleanLCName(t.lc);
+          if(!lc || t.factor===0) return;
+          if(t.type==='MV'){ if(writtenMV.has(lc)) mvParts.push(`MV, ${lc}, ${t.factor}`); }
+          else if(writtenST.has(lc)) stParts.push(`ST, ${lc}, ${t.factor}`);
+        });
       } else {
         // Factor-based fallback
         const dcF=+(combo.dcFactor??1), dwF=+(combo.dwFactor??combo.dcFactor??1), llF=+(combo.llFactor??1);
-        const stParts=[...writtenST].filter(lc=>lc!==swCase||dcF!==0).map(lc=>{
+        stParts=[...writtenST].filter(lc=>lc!==swCase||dcF!==0).map(lc=>{
           const f=lc.startsWith('DW')?dwF:dcF; return f!==0?`ST, ${lc}, ${f}`:null;
         }).filter(Boolean);
-        const mvParts=llF!==0?[...writtenMV].map(mv=>`MV, ${mv}, ${llF}`):[];
-        allParts=[...stParts,...mvParts];
+        mvParts=llF!==0?[...writtenMV].map(mv=>`MV, ${mv}, ${llF}`):[];
       }
-      if(!allParts.length) return;
-      p(`   NAME=${combo.name}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
-      p(`        ${allParts.join(', ')}`, '');
+      // Multiple MV terms must NOT be summed (HL-93 truck/tandem are an envelope) —
+      // emit one combination per vehicle, each with the same ST parts + one MV term.
+      if (mvParts.length > 1) {
+        mvParts.forEach(mv=>{
+          const vehName = mv.split(',')[1].trim().replace(/_GFS$/,'');
+          p(`   NAME=${cleanLCName(combo.name)} (${vehName}), STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+          p(`        ${[...stParts, mv].join(', ')}`, '');
+        });
+      } else {
+        const allParts=[...stParts,...mvParts];
+        if(!allParts.length) return;
+        p(`   NAME=${cleanLCName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+        p(`        ${allParts.join(', ')}`, '');
+      }
     });
     p('');
   }
