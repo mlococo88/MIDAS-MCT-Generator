@@ -6170,15 +6170,21 @@ function StepCombos({cfg,set}) {
         ↺ Sync Dead Load Combos
       </button>
       <button onClick={()=>{
-          // Add/replace the PS-Beam passthrough set (psb_ ids). Keeps everything else.
-          const fresh = buildPSBeamCombos(cfg);
-          const kept = combos.filter(c=>!c.id?.startsWith('psb_'));
-          setCombos([...kept, ...fresh]);
+          // 1. Moving loads → HL-93 truck + tandem ONLY, each at 33% impact (per-vehicle
+          //    DLA so the global DLA mode is left untouched).
+          // 2. Add/replace the PS-Beam passthrough combos (psb_ ids). Keeps everything else.
+          const vehicles=['HL-93TRK','HL-93TDM'];
+          set('selectedVehicles', vehicles);
+          set('vehicleDLA', {...(cfg.vehicleDLA||{}), 'HL-93TRK':33, 'HL-93TDM':33});
+          set('useGlobalDLA', false);   // ensure the per-vehicle 33% is what gets applied
+          const fresh = buildPSBeamCombos({...cfg, selectedVehicles:vehicles});
+          const kept = (cfg.loadCombos||combos).filter(c=>!c.id?.startsWith('psb_'));
+          set('loadCombos', [...kept, ...fresh]);
         }}
-        title="Create passthrough combos (DC1, DC2, DW, and one per live load) at factor 1.0 — the exact set the PS-Beam export needs. Keeps existing combos."
+        title="Set up for PS-Beam export: HL-93 truck + tandem at 33% impact, plus passthrough combos (DC1, DC2, DW, LL) at factor 1.0. Replaces vehicle selection and the psb_ combos; keeps your other combos."
         style={{background:'#eff6ff',border:'1px solid #1d4ed8',borderRadius:'5px',
           color:'#1d4ed8',padding:'6px 14px',cursor:'pointer',fontSize:'12px',fontWeight:'600'}}>
-        🔗 PS-Beam Combos
+        🔗 PS-Beam Setup
       </button>
       <button onClick={reset}
         title="Restore all defaults: dead load combos from Step 4 + AASHTO presets"
