@@ -5031,9 +5031,9 @@ function StepLoads({cfg,set}) {
   const totalDW = deadLoads.filter(d=>d.type==='DW').reduce((s,d)=>s+(d.value||0),0);
 
   const PRESETS = [
-    {name:'DC1 — Non-composite DL', type:'DC1', value:0, hint:'SDL before deck pour (steel, formwork)'},
-    {name:'DC2 — Composite DL',     type:'DC2', value:0, hint:'SDL after deck cures (barriers, diaphragms)'},
-    {name:'DW — Wearing Surface',   type:'DW',  value:0, hint:'Future overlay or utilities'},
+    {name:'DC1 - Non-composite DL', type:'DC1', value:0, hint:'SDL before deck pour (steel, formwork)'},
+    {name:'DC2 - Composite DL',     type:'DC2', value:0, hint:'SDL after deck cures (barriers, diaphragms)'},
+    {name:'DW - Wearing Surface',   type:'DW',  value:0, hint:'Future overlay or utilities'},
     {name:'Deck Slab',              type:'DC1', value:0, hint:'Concrete deck weight on girder'},
     {name:'Haunch',                 type:'DC1', value:0, hint:'Haunch/fillet concrete above top flange'},
     {name:'Movable Barrier',        type:'DW',  value:0, hint:'Jersey or traffic railing barrier'},
@@ -16572,9 +16572,9 @@ const DEFAULT_CFG = {
   deckSlabLoad:0.738281,haunchLoad:0.0085625,barrierLoad:0.465,diaphragmLoad:0,
   deadLoadLabels:{deckSlab:'Deck Slab',haunch:'Haunch',barrier:'Movable Barrier',diaphragm:'Diaphragm'},
   deadLoads:[
-    {id:'dl1',name:'DC1 — Non-composite DL',type:'DC1',value:0.738281},
-    {id:'dl2',name:'DC2 — Composite DL',    type:'DC2',value:0.0085625},
-    {id:'dl3',name:'DW — Barrier/Overlay',  type:'DW', value:0.465},
+    {id:'dl1',name:'DC1 - Non-composite DL',type:'DC1',value:0.738281},
+    {id:'dl2',name:'DC2 - Composite DL',    type:'DC2',value:0.0085625},
+    {id:'dl3',name:'DW - Barrier/Overlay',  type:'DW', value:0.465},
   ],
   movingLoadCode:'AASHTO LRFD',
   selectedVehicles:['HL-93TRK','HL-93TDM'],
@@ -17587,13 +17587,38 @@ class StepErrorBoundary extends React.Component {
 function App() {
   const [step,setStep]=useState(0);
   const [cfg,setCfg]=useState(()=>{
+    // Replace characters MIDAS mojibakes (em-dash —, en-dash –, middot ·) with ASCII
+    // so load CASE names round-trip cleanly through MIDAS. Applies to dead-load names
+    // and GFS static-load case strings.
+    const cleanName = s => typeof s==='string'
+      ? s.replace(/[\u2010-\u2015\u2212]/g,'-').replace(/[\u00B7\u2022\u00A0]/g,' ').replace(/\s+/g,' ').trim()
+      : s;
+    const sanitizeNames = cfg => {
+      if(!cfg) return cfg;
+      const out = {...cfg};
+      if(Array.isArray(out.deadLoads))
+        out.deadLoads = out.deadLoads.map(d=>({...d, name:cleanName(d.name)}));
+      if(out.gfs?.staticLoads){
+        const sl={...out.gfs.staticLoads};
+        sl.selfWeightCase = cleanName(sl.selfWeightCase);
+        ['girderLoads','floorbeamLoads','stringerLoads'].forEach(k=>{
+          if(Array.isArray(sl[k])) sl[k]=sl[k].map(e=>({...e, loadCase:cleanName(e.loadCase)}));
+        });
+        out.gfs = {...out.gfs, staticLoads:sl};
+      }
+      // Combo terms reference load-case names — clean those too so they still match
+      if(Array.isArray(out.loadCombos))
+        out.loadCombos = out.loadCombos.map(c=>({...c,
+          terms:Array.isArray(c.terms)?c.terms.map(t=>({...t, lc:cleanName(t.lc)})):c.terms}));
+      return out;
+    };
     const migrateDC = cfg => {
       // Remap any legacy type:'DC' loads to 'DC1'
-      if (!cfg.deadLoads) return cfg;
+      if (!cfg.deadLoads) return sanitizeNames(cfg);
       const deadLoads = cfg.deadLoads.map(d=>d.type==='DC'?{...d,type:'DC1'}:d);
       // Deep-merge rating so new fields always get defaults
       const rating = {...(DEFAULT_CFG.rating||{}), ...(cfg.rating||{})};
-      return {...cfg, deadLoads, rating, loadCombos: cfg.loadCombos && cfg.loadCombos.length ? cfg.loadCombos : buildDefaultCombos(deadLoads)};
+      return sanitizeNames({...cfg, deadLoads, rating, loadCombos: cfg.loadCombos && cfg.loadCombos.length ? cfg.loadCombos : buildDefaultCombos(deadLoads)});
     };
     try{
       const s=localStorage.getItem('mct_cfg_v3');
