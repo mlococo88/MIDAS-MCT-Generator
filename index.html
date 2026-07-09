@@ -681,6 +681,116 @@ function buildPSBeamExport({cfg, origRows, nodePositions, isGFS, gfsMember, gfsM
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Steel-beam export — same force-effect demands as the PS-Beam export, PLUS the
+// plate-girder section makeup and transitions along the member. For NEW welded
+// plate girders: top flange, bottom flange, web plate only (no built-up rivets).
+// Captures where each of the three plates changes dimension (transition stations).
+// ─────────────────────────────────────────────────────────────────────────────
+function buildSteelBeamExport({cfg, origRows, nodePositions, isGFS, gfsMember, gfsMembers, span}){
+  // Reuse the demand builder verbatim so the force effects are identical
+  const base = buildPSBeamExport({cfg, origRows, nodePositions, isGFS, gfsMember, gfsMembers, span});
+  const AS = cfg.aremaSection||{};
+  const lib = AS.sectionLibrary||[];
+
+  // Equivalent welded-plate-girder dims for a library section — the SAME computation
+  // as the "Applied Section Schedule" (matches depth, Ix, gross area, shear area of the
+  // built-up section). Returns the three plate elements the steel-beam tool designs.
+  const platesForSection = (libId) => {
+    const libSec = lib.find(s=>s.id===libId) || lib[0];
+    if(!libSec) return null;
+    try{
+      const def = {...AS, ...libSec};
+      const sec = computeAremaSection(def, false);
+      const eq  = computeEquivMCTSection(sec, def);
+      return {
+        depth:      +(+eq._D).toFixed(4),                 // total section depth (in)
+        topFlange:{ width:+(+eq._B).toFixed(4), thickness:+(+eq._tf).toFixed(4) },
+        web:      { depth:+(+eq._hw).toFixed(4), thickness:+(+eq._tw).toFixed(4) },  // clear web height
+        botFlange:{ width:+(+eq._B).toFixed(4), thickness:+(+eq._tf).toFixed(4) },
+        properties:{ Ix_gross:+(+sec.IxG).toFixed(2), A_gross:+(+(sec.totAg)||0).toFixed(3), Aw:+(+(sec.Aw)||0).toFixed(3) },
+        section: libSec.name || libSec.id || '',
+      };
+    }catch(e){ return null; }
+  };
+
+  // Build the zone list (start/end in member-local ft) + equivalent plates.
+  let zones = [];
+  if (isGFS && gfsMember) {
+    const g=cfg.gfs||{};
+    const mem=(gfsMembers||[]).find(m=>m.key===gfsMember);
+    const defs=mem?.type==='girder'?(g.girderDefs||[]):mem?.type==='floorbeam'?(g.floorbeamDefs||[]):(g.stringerDefs||[]);
+    const aid=(g.memberAssign||{})[gfsMember];
+    const def=(aid&&defs.find(d=>d.id===aid))||defs[0];
+    const L = base.member?.totalLength || (+span||0);
+    if(def?.zones?.length){
+      const isFrac = mem?.type==='stringer';
+      zones = [...def.zones].sort((a,b)=>(+a.startX||0)-(+b.startX||0)).map(z=>{
+        const pl=platesForSection(z.libId);
+        return pl ? {
+          startX:+(isFrac?(+z.startX||0)*L:(+z.startX||0)).toFixed(4),
+          endX:+(isFrac?(+z.endX||0)*L:(+z.endX||0)).toFixed(4),
+          ...pl,
+        } : null;
+      }).filter(Boolean);
+    }
+  } else {
+    const totalLen = base.member?.totalLength || (+span||0);
+    if(AS.zonesEnabled && AS.sectionZones?.length){
+      // Build a full contiguous zone list: the base section (library[0]) fills any
+      // range NOT covered by an explicit zone ("Section 1 elsewhere" in the UI).
+      const baseId = lib[0]?.id;
+      const explicit = [...AS.sectionZones].sort((a,b)=>+(a.startX||0)-+(b.startX||0));
+      const segs=[]; let cursor=0;
+      explicit.forEach(z=>{
+        const s=+(+z.startX||0), e=+(+z.endX||0);
+        if(s>cursor+1e-6) segs.push({startX:+cursor.toFixed(4), endX:+s.toFixed(4), libId:baseId}); // base gap
+        segs.push({startX:+s.toFixed(4), endX:+e.toFixed(4), libId:z.sectionId});
+        cursor=Math.max(cursor,e);
+      });
+      if(cursor<totalLen-1e-6) segs.push({startX:+cursor.toFixed(4), endX:+totalLen.toFixed(4), libId:baseId}); // trailing base
+      zones = segs.map(sg=>{ const pl=platesForSection(sg.libId); return pl?{startX:sg.startX,endX:sg.endX,...pl}:null; }).filter(Boolean);
+    } else {
+      const pl=platesForSection(lib[0]?.id);
+      if(pl) zones=[{startX:0, endX:+totalLen.toFixed(4), ...pl}];
+    }
+  }
+
+  // Derive transition stations per plate element — where a dimension actually changes.
+  // Merge consecutive zones with identical plates first (so "Section 1 → Section 1"
+  // adjacency doesn't create a spurious transition).
+  const merged=[];
+  const samePlates=(a,b)=> a&&b && a.topFlange.width===b.topFlange.width && a.topFlange.thickness===b.topFlange.thickness
+                        && a.web.depth===b.web.depth && a.web.thickness===b.web.thickness
+                        && a.botFlange.width===b.botFlange.width && a.botFlange.thickness===b.botFlange.thickness;
+  zones.forEach(z=>{
+    const last=merged[merged.length-1];
+    if(last && samePlates(last,z) && Math.abs(last.endX-z.startX)<1e-6) last.endX=z.endX;  // extend
+    else merged.push({...z});
+  });
+  const transitions = { topFlange:[], web:[], botFlange:[] };
+  const flChanged=(a,b)=>!a||!b||a.width!==b.width||a.thickness!==b.thickness;
+  const webChanged=(a,b)=>!a||!b||a.depth!==b.depth||a.thickness!==b.thickness;
+  for(let i=1;i<merged.length;i++){
+    const x=merged[i].startX, pv=merged[i-1], cu=merged[i];
+    if(flChanged(pv.topFlange,cu.topFlange)) transitions.topFlange.push({x, from:pv.topFlange, to:cu.topFlange});
+    if(webChanged(pv.web,cu.web))            transitions.web.push({x, from:pv.web, to:cu.web});
+    if(flChanged(pv.botFlange,cu.botFlange)) transitions.botFlange.push({x, from:pv.botFlange, to:cu.botFlange});
+  }
+
+  return {
+    ...base,
+    _schema:'steelbeam-external-demands',
+    girderType:'welded-plate',   // top flange + web + bottom flange only
+    section:{
+      units:{ length:'in' },
+      note:'Equivalent welded-plate-girder dimensions (match depth, Ix, gross area, shear area of the built-up section).',
+      zones: merged,   // contiguous, base section fills gaps, equal-plate zones merged
+      transitions,     // where each plate element changes, with from/to dimensions
+    },
+  };
+}
+
 function generateAremaReport({cfg, ap, data, govN, govX, govM, govFat, settings={}, gfsInfo=null}) {
   const show = k => settings[k] !== false;  // default true if not in settings
   const R2 = cfg?.rating || {};  // rating config shorthand
@@ -1470,6 +1580,26 @@ function cleanLCName(s){
     : s;
 }
 
+// MIDAS caps Load Combination names at 20 characters. Build a combo name with an
+// optional short vehicle suffix that stays within the limit. Vehicle names are
+// abbreviated (HL-93TRK→TRK, HL-93TDM→TDM) and the base name is truncated if needed.
+const MIDAS_COMBO_NAME_MAX = 20;
+function shortVehTag(vehName){
+  if(!vehName) return '';
+  const m = vehName.match(/(TRK|TDM|TRUCK|TANDEM|LANE)/i);
+  if(m) return m[1].toUpperCase().replace('TRUCK','TRK').replace('TANDEM','TDM');
+  // else last alphanumeric chunk, capped
+  return vehName.replace(/[^A-Za-z0-9]/g,'').slice(-4).toUpperCase();
+}
+function midasComboName(baseName, vehName){
+  const base = cleanLCName(baseName||'');
+  const tag  = shortVehTag(vehName);
+  if(!tag) return base.slice(0, MIDAS_COMBO_NAME_MAX);
+  const suffix = '-'+tag;                        // e.g. "-TRK"
+  const room = MIDAS_COMBO_NAME_MAX - suffix.length;
+  return (base.slice(0, room) + suffix).slice(0, MIDAS_COMBO_NAME_MAX);
+}
+
 function generateMCT(cfg) {
   const { projectUser,projectDate,version,spans,elemsPerSpan,materialGrade,
     section1Name,
@@ -1831,13 +1961,13 @@ function generateMCT(cfg) {
         const vehName = mv.split(',')[1].trim().replace(`_${safeLaneName}`,'');
         const parts = [...stParts, mv];
         if(!parts.length) return;
-        p(`   NAME=${cleanLCName(combo.name)} (${vehName}), STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+        p(`   NAME=${midasComboName(combo.name, vehName)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
         p(`        ${parts.join(', ')}`, ``);
       });
     } else {
       const allParts = [...stParts, ...mvParts];
       if (!allParts.length) return;
-      p(`   NAME=${cleanLCName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+      p(`   NAME=${midasComboName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
       p(`        ${allParts.join(', ')}`, ``);
     }
   });
@@ -2723,13 +2853,13 @@ function generateGFS_MCT(cfg) {
       if (mvParts.length > 1) {
         mvParts.forEach(mv=>{
           const vehName = mv.split(',')[1].trim().replace(/_GFS$/,'');
-          p(`   NAME=${cleanLCName(combo.name)} (${vehName}), STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+          p(`   NAME=${midasComboName(combo.name, vehName)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
           p(`        ${[...stParts, mv].join(', ')}`, '');
         });
       } else {
         const allParts=[...stParts,...mvParts];
         if(!allParts.length) return;
-        p(`   NAME=${cleanLCName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
+        p(`   NAME=${midasComboName(combo.name)}, STEEL, ${kind}, 0, 0, , 0, 0, 0, 1`);
         p(`        ${allParts.join(', ')}`, '');
       }
     });
@@ -4602,273 +4732,16 @@ function StepSections({cfg,set}) {
   const overlapWarning = zones.some((z,i)=>i>0&&parseFloat(z.startX)<parseFloat(zones[i-1].endX)-0.001);
 
 
-  return (<div><StepHeader icon="🔩" title="Material & Sections" sub="Steel grade, reference section, and section zone assignments"/>
+  return (<div><StepHeader icon="🔩" title="Material & Sections" sub="Steel grade and plate-girder / rolled-beam section definitions with zones"/>
     <div style={{display:'flex',gap:'28px',flexWrap:'wrap'}}>
 
-      {/* ── Left: material + reference + summary ── */}
+      {/* ── Left: material ── */}
       <div style={{minWidth:'250px',maxWidth:'280px'}}>
         <Field label="Steel Grade">
           <select style={INP} value={cfg.materialGrade} onChange={e=>set('materialGrade',e.target.value)}>
             {['A36','A572-50','A992','A588'].map(g=><option key={g}>{g}</option>)}
           </select>
         </Field>
-        <Field label="Reference Section (iSEC=1)" hint="Registered in MCT for design checks — not applied to elements">
-          <select style={INP} value={cfg.section1Name} onChange={e=>set('section1Name',e.target.value)}>
-            {W_SHAPES.map(s=><option key={s}>{s}</option>)}
-          </select>
-        </Field>
-
-        <div style={{marginTop:'16px',borderTop:'1px solid #e5e7eb',paddingTop:'12px'}}>
-          <div style={{fontSize:'10px',fontFamily:'monospace',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'8px'}}>MCT Sections Registered</div>
-          {Object.entries(secIdMap).sort((a,b)=>a[1]-b[1]).map(([name,id])=>{
-            const col=SEC_COLORS[(id-1)%SEC_COLORS.length];
-            const myZones=zones.filter(z=>z.name===name);
-            return <div key={name} style={{display:'flex',alignItems:'center',gap:'7px',padding:'5px 9px',marginBottom:'4px',
-              background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'5px',borderLeft:`3px solid ${col}`}}>
-              <span style={{fontSize:'10px',fontFamily:'monospace',color:col,fontWeight:'700',minWidth:'48px'}}>iSEC={id}</span>
-              <span style={{fontSize:'11.5px',fontWeight:'500',color:'#111827',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</span>
-              {myZones.length?<span style={{fontSize:'9px',color:'#9ca3af',fontFamily:'monospace',flexShrink:0}}>{myZones.length} zone{myZones.length>1?'s':''}</span>
-                :<span style={{fontSize:'9px',color:'#d1d5db',fontFamily:'monospace'}}>ref</span>}
-            </div>;
-          })}
-        </div>
-      </div>
-
-      {/* ── Right: zone editor (collapses when AREMA built-up sections are active) ── */}
-      <div style={{flex:1,minWidth:'420px'}}>
-        {aremaActive && !showZoneEditor ? (
-          /* ── Collapsed state when AREMA active ── */
-          <div style={{padding:'12px 16px',background:'#f0fdf4',border:'1px solid #86efac',
-            borderRadius:'8px',borderLeft:'4px solid #16a34a'}}>
-            <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'6px'}}>
-              <span style={{fontSize:'12px',fontWeight:'700',color:'#15803d'}}>🏗 AREMA Built-Up Sections Active</span>
-            </div>
-            <div style={{fontSize:'10.5px',fontFamily:'monospace',color:'#374151',lineHeight:'1.6',marginBottom:'10px'}}>
-              Catalog section zones are <strong>overridden</strong> in the MCT output.
-              Elements are assigned equivalent H-sections from the AREMA library below
-              — one per span zone (or the first library section across the full span).
-              The reference section (iSEC=1) is still registered in MCT for design checks.
-            </div>
-            <button onClick={()=>setShowZoneEditor(true)}
-              style={{padding:'4px 12px',background:'#fff',border:'1px solid #86efac',borderRadius:'4px',
-                fontSize:'10.5px',fontFamily:'monospace',color:'#15803d',cursor:'pointer'}}>
-              Show catalog zone editor ▼
-            </button>
-          </div>
-        ) : (
-          /* ── Full zone editor ── */
-          <div>
-            {aremaActive && (
-              <div style={{padding:'6px 12px',background:'#fefce8',border:'1px solid #fde047',
-                borderRadius:'6px',marginBottom:'10px',display:'flex',alignItems:'center',
-                justifyContent:'space-between',fontSize:'10.5px',fontFamily:'monospace'}}>
-                <span style={{color:'#854d0e'}}>
-                  ⚠ AREMA mode — catalog zones are overridden in MCT output. Editing for reference only.
-                </span>
-                <button onClick={()=>setShowZoneEditor(false)}
-                  style={{marginLeft:'12px',padding:'2px 10px',background:'#fff',border:'1px solid #fde047',
-                    borderRadius:'4px',cursor:'pointer',fontSize:'10px',color:'#854d0e',flexShrink:0}}>
-                  Collapse ▲
-                </button>
-              </div>
-            )}
-        {/* Visual zone bar */}
-        <div style={{marginBottom:'14px'}}>
-          <div style={{fontSize:'10px',fontFamily:'monospace',color:'#6b7280',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:'6px'}}>
-            Zone Layout — {totalLen.toFixed(2)} ft total
-          </div>
-          <div style={{position:'relative',height:'32px',background:'#f3f4f6',borderRadius:'6px',overflow:'hidden',border:'1px solid #e5e7eb'}}>
-            {zones.map((z,i)=>{
-              const s=parseFloat(z.startX)/totalLen*100;
-              const w=(parseFloat(z.endX)-parseFloat(z.startX))/totalLen*100;
-              const col=SEC_COLORS[(secIdMap[z.name]-1)%SEC_COLORS.length]||'#9ca3af';
-              return <div key={z.id} style={{position:'absolute',left:`${s}%`,width:`${w}%`,height:'100%',
-                background:col+'28',borderRight:'2px solid '+col,borderLeft:i===0?'none':'2px solid '+col,
-                display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden'}}>
-                <span style={{fontSize:'9.5px',fontFamily:'monospace',color:col,fontWeight:'600',whiteSpace:'nowrap',
-                  overflow:'hidden',textOverflow:'ellipsis',padding:'0 4px'}}>{z.name}</span>
-              </div>;
-            })}
-          </div>
-          {/* Tick marks at span boundaries */}
-          <div style={{position:'relative',height:'12px'}}>
-            {(()=>{let cx=0;return cfg.spans.map((sp,i)=>{cx+=sp;return i<cfg.spans.length-1?
-              <div key={i} style={{position:'absolute',left:`${cx/totalLen*100}%`,top:0,
-                width:'1px',height:'8px',background:'#9ca3af',transform:'translateX(-50%)'}}/> :null;});})()}
-          </div>
-        </div>
-
-        {/* Toolbar */}
-        <div style={{display:'flex',gap:'6px',marginBottom:'10px',alignItems:'center'}}>
-          <button onClick={addZone} style={{background:'#1d4ed8',border:'none',borderRadius:'5px',color:'#fff',
-            padding:'6px 12px',cursor:'pointer',fontSize:'12px',fontWeight:'500'}}>+ Add Zone</button>
-          <button onClick={syncToSpans} style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'5px',
-            color:'#374151',padding:'6px 12px',cursor:'pointer',fontSize:'12px'}}>⇄ Sync to Spans</button>
-          <span style={{marginLeft:'auto',fontSize:'10.5px',color:'#9ca3af',fontFamily:'monospace'}}>
-            {zones.length} zone{zones.length!==1?'s':''} · {Object.keys(secIdMap).length-1} unique applied
-          </span>
-        </div>
-
-        {/* Warnings */}
-        {gapWarning&&<div style={{padding:'7px 12px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:'5px',fontSize:'11.5px',color:'#92400e',marginBottom:'8px'}}>
-          ⚠ Zones don't cover the full bridge length (0 to {totalLen.toFixed(2)} ft). Uncovered elements will use the last zone's section.
-        </div>}
-        {overlapWarning&&<div style={{padding:'7px 12px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:'5px',fontSize:'11.5px',color:'#dc2626',marginBottom:'8px'}}>
-          ⚠ Zones overlap — element assignments may be ambiguous. Check start/end values.
-        </div>}
-
-        {/* Zone rows */}
-        <div style={{display:'flex',flexDirection:'column',gap:'8px'}}>
-          {zones.map((z,i)=>{
-            const col=SEC_COLORS[(secIdMap[z.name]-1)%SEC_COLORS.length]||'#9ca3af';
-            const isCustom=z.type==='custom';
-            return (
-              <div key={z.id} style={{background:'#fff',border:'1px solid #e5e7eb',borderRadius:'7px',
-                borderLeft:`4px solid ${col}`,padding:'12px 14px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
-                {/* Row header */}
-                <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'10px'}}>
-                  <span style={{fontSize:'11px',fontFamily:'monospace',fontWeight:'700',color:col}}>Zone {i+1}</span>
-                  {/* Start / End X */}
-                  <div style={{display:'flex',alignItems:'center',gap:'5px',flex:1}}>
-                    <input type="number" step="0.25" min="0" max={totalLen} style={{...INP2,width:'88px',textAlign:'right'}}
-                      value={z.startX} onChange={e=>updateZone(z.id,'startX',parseFloat(e.target.value)||0)}/>
-                    <span style={{fontSize:'11px',color:'#9ca3af',fontFamily:'monospace'}}>→</span>
-                    <input type="number" step="0.25" min="0" max={totalLen} style={{...INP2,width:'88px',textAlign:'right'}}
-                      value={z.endX} onChange={e=>updateZone(z.id,'endX',parseFloat(e.target.value)||totalLen)}/>
-                    <span style={{fontSize:'10.5px',color:'#9ca3af',fontFamily:'monospace'}}>ft</span>
-                    <span style={{fontSize:'10px',color:'#6b7280',fontFamily:'monospace',background:'#f3f4f6',
-                      padding:'2px 7px',borderRadius:'4px'}}>
-                      {(parseFloat(z.endX)-parseFloat(z.startX)).toFixed(2)} ft
-                    </span>
-                  </div>
-                  {/* Type toggle */}
-                  <div style={{display:'flex',borderRadius:'5px',overflow:'hidden',border:'1px solid #e5e7eb',flexShrink:0}}>
-                    {['catalog','custom'].map(t=>(
-                      <button key={t} onClick={()=>updateZone(z.id,'type',t)} style={{
-                        padding:'4px 10px',border:'none',cursor:'pointer',fontSize:'11px',
-                        background:z.type===t?'#1d4ed8':'#fff',color:z.type===t?'#fff':'#6b7280',fontWeight:z.type===t?'600':'400'}}>
-                        {t==='catalog'?'📚 Catalog':'✏ Custom'}
-                      </button>
-                    ))}
-                  </div>
-                  {zones.length>1&&<button onClick={()=>removeZone(z.id)} title="Remove zone" style={{background:'none',border:'none',
-                    color:'#d1d5db',cursor:'pointer',fontSize:'16px',padding:'0 4px',lineHeight:1}} title="Remove zone">×</button>}
-                </div>
-
-                {/* Section inputs */}
-                {!isCustom ? (
-                  <div style={{display:'flex',gap:'10px',alignItems:'center'}}>
-                    <span style={{fontSize:'10.5px',color:'#6b7280',fontFamily:'monospace',minWidth:'60px'}}>W-Shape</span>
-                    <select style={{...INP2,flex:1,borderColor:col+'60',background:col+'06'}}
-                      value={z.name} onChange={e=>updateZone(z.id,'name',e.target.value)}>
-                      {W_SHAPES.map(s=><option key={s}>{s}</option>)}
-                    </select>
-                    <span style={{fontSize:'10px',fontFamily:'monospace',color:col,fontWeight:'700',
-                      background:col+'15',padding:'2px 8px',borderRadius:'99px',border:`1px solid ${col}30`}}>
-                      iSEC={secIdMap[z.name]||'?'}
-                    </span>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{display:'flex',gap:'8px',alignItems:'center',marginBottom:'8px'}}>
-                      <span style={{fontSize:'10.5px',color:'#6b7280',fontFamily:'monospace',minWidth:'60px'}}>Name</span>
-                      <input style={{...INP2,flex:1}} value={z.name}
-                        onChange={e=>updateZone(z.id,'name',e.target.value)} placeholder="e.g. PG-48x1"/>
-                      <span style={{fontSize:'10px',fontFamily:'monospace',color:col,fontWeight:'700',
-                        background:col+'15',padding:'2px 8px',borderRadius:'99px',border:`1px solid ${col}30`}}>
-                        iSEC={secIdMap[z.name]||'?'}
-                      </span>
-                      {isCustom && (
-                        <button
-                          onClick={() => {
-                            if (!z.name.trim()) {
-                              alert('Please enter a shape name first');
-                              return;
-                            }
-                            const allShapes = getAllRolledShapes(cfg.customRolledShapes || {});
-                            if (allShapes[z.name]) {
-                              alert(`Shape "${z.name}" already exists`);
-                              return;
-                            }
-                            // Convert plate girder dimensions (inches) to rolled shape properties
-                            const newShape = {
-                              d: z.H || 0,           // Depth in inches
-                              bf: Math.max(z.B1, z.B2) || 0,  // Flange width (use larger)
-                              tf: (parseFloat(z.tf1) + parseFloat(z.tf2)) / 2 || 0,  // Avg flange thickness
-                              tw: z.tw || 0,         // Web thickness in inches
-                              Fy: 50                 // Default yield strength
-                            };
-                            const newCustom = {...(cfg.customRolledShapes || {}), [z.name]: newShape};
-                            set('customRolledShapes', newCustom);
-                            alert(`Saved "${z.name}" to custom shapes database!`);
-                          }}
-                          title="Save this plate girder as a custom rolled shape"
-                          style={{padding:'4px 10px',background:'#059669',color:'#fff',border:'none',borderRadius:'4px',
-                            cursor:'pointer',fontWeight:'600',fontSize:'9px',whiteSpace:'nowrap'}}>
-                          💾 Save Shape
-                        </button>
-                      )}
-                    </div>
-                    {/* Custom I-shape dims — in INCHES */}
-                    <div style={{background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:'6px',padding:'10px 12px'}}>
-                      <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',marginBottom:'8px',textTransform:'uppercase',letterSpacing:'0.06em'}}>
-                        Plate Girder Dimensions (inches)
-                      </div>
-                      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'8px'}}>
-                        {[
-                          {f:'H',  label:'H (web ht)',   hint:'Web height'},
-                          {f:'tw', label:'tw (web thk)', hint:'Web thickness'},
-                          {f:'B1', label:'B1 (top flg)', hint:'Top flange width'},
-                          {f:'tf1',label:'tf1 (top thk)',hint:'Top flange thickness'},
-                          {f:'B2', label:'B2 (bot flg)', hint:'Bottom flange width'},
-                          {f:'tf2',label:'tf2 (bot thk)',hint:'Bottom flange thickness'},
-                        ].map(({f,label,hint})=>(
-                          <div key={f}>
-                            <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#9ca3af',marginBottom:'3px'}}>{label}</div>
-                            <input type="number" step="1" min="0" style={{...INP2,width:'100%',textAlign:'right'}}
-                              value={z[f]||''} placeholder="in"
-                              onChange={e=>updateZone(z.id,f,parseFloat(e.target.value)||0)}
-                              title={hint}/>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Mini section preview */}
-                      {z.H&&z.B1&&z.B2&&(()=>{
-                        const H=z.H||0,tw=z.tw||0.5,B1=z.B1||12,tf1=z.tf1||1,B2=z.B2||12,tf2=z.tf2||1;
-                        const totalD=H+tf1+tf2;
-                        const scale=48/totalD; const wScale=48/Math.max(B1,B2);
-                        return <div style={{marginTop:'10px',display:'flex',gap:'12px',alignItems:'flex-end'}}>
-                          <svg width="60" height="54" viewBox="0 0 60 54">
-                            {/* Top flange */}
-                            <rect x={(30-B1*wScale/2).toFixed(1)} y="1" width={(B1*wScale).toFixed(1)} height={(tf1*scale).toFixed(1)} fill={col} opacity="0.7"/>
-                            {/* Web */}
-                            <rect x={(30-tw*wScale/2).toFixed(1)} y={(1+tf1*scale).toFixed(1)} width={(tw*wScale).toFixed(1)} height={(H*scale).toFixed(1)} fill={col} opacity="0.5"/>
-                            {/* Bottom flange */}
-                            <rect x={(30-B2*wScale/2).toFixed(1)} y={(1+tf1*scale+H*scale).toFixed(1)} width={(B2*wScale).toFixed(1)} height={(tf2*scale).toFixed(1)} fill={col} opacity="0.7"/>
-                          </svg>
-                          <div style={{fontSize:'9.5px',fontFamily:'monospace',color:'#6b7280',lineHeight:'1.7'}}>
-                            d = {totalD.toFixed(3)} in<br/>
-                            A ≈ {(B1*tf1+H*tw+B2*tf2).toFixed(2)} in²<br/>
-                            MCT: <span style={{color:'#1d4ed8'}}>2, {H}, {B1}, {tf1}, {tw}, {B2}, {tf2}, 0…</span>
-                          </div>
-                        </div>;
-                      })()}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        <div style={{marginTop:'10px'}}>
-          <InfoBox>
-            Zone boundaries that don't align with the regular mesh will create <strong>new nodes</strong> in the MCT output at those exact X positions.
-            Catalog sections use AISC10(US) database. Custom sections write user-defined plate girder dimensions in inches.
-          </InfoBox>
-        </div>
-          </div>
-        )}
       </div>
     </div>
 
@@ -4877,9 +4750,10 @@ function StepSections({cfg,set}) {
       const AS     = cfg.aremaSection || {};
       const enabled = !!AS.enabled;
       const setAS  = patch => set('aremaSection', {...AS,...patch});
-      // Migrate: if old base-section comps exist but no library yet, seed library automatically
+      // Migrate/seed: ensure there's always at least one section in the library,
+      // since this module is now the single section source.
       const library = AS.sectionLibrary || [];
-      if (enabled && library.length===0 && (AS.aremaComps||AS.outToOut)) {
+      if (enabled && library.length===0) {
         const seedSec = {
           id:'sl0', name:'Section 1',
           aremaComps: AS.aremaComps||defaultAremaComps(),
@@ -4892,43 +4766,34 @@ function StepSections({cfg,set}) {
         };
         setTimeout(()=>setAS({sectionLibrary:[seedSec]}),0);
       }
+      // AREMA section module is ALWAYS active now — it's the single source of
+      // sections, zones, and MCT *SECTION output. Auto-enable and seed a default
+      // section so there's always at least one to assign.
+      if(!enabled){ setTimeout(()=>setAS({enabled:true}),0); }
       return (
         <div style={{marginTop:'10px',padding:'14px 16px',background:'#f8fafc',
           border:'1px solid #e5e7eb',borderRadius:'8px'}}>
-          {/* Enable toggle + global loss toggle */}
+          {/* Header + global loss toggle (module is always on — no enable checkbox) */}
           <div style={{display:'flex',alignItems:'center',gap:'10px',flexWrap:'wrap'}}>
-            <label style={{display:'flex',alignItems:'center',gap:'6px',cursor:'pointer',fontWeight:'600',fontSize:'12px',color:enabled?'#1d4ed8':'#374151'}}>
-              <input type="checkbox" checked={enabled} onChange={e=>setAS({enabled:e.target.checked})}
-                style={{accentColor:'#1d4ed8',width:'14px',height:'14px'}}/>
-              🏗 AREMA Built-Up Plate Girder Section
-            </label>
-            <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af'}}>
-              Define cross-sections — properties flow into the 🚂 AREMA Rating step
+            <span style={{display:'flex',alignItems:'center',gap:'6px',fontWeight:'700',fontSize:'12px',color:'#1d4ed8'}}>
+              🏗 Plate Girder / Rolled Beam Sections
             </span>
-            {enabled&&(
-              <label style={{display:'flex',alignItems:'center',gap:'5px',cursor:'pointer',
-                fontWeight:'600',fontSize:'11px',marginLeft:'auto',
-                color:AS.applyLoss?'#b45309':'#6b7280',
-                background:AS.applyLoss?'#fef3c7':'#f3f4f6',
-                padding:'3px 10px',borderRadius:'5px',border:`1px solid ${AS.applyLoss?'#fcd34d':'#e5e7eb'}`}}>
-                <input type="checkbox" checked={!!AS.applyLoss}
-                  onChange={e=>setAS({applyLoss:e.target.checked})}
-                  style={{accentColor:'#b45309'}}/>
-                🔍 Apply Section Loss to Rating (As-Inspected)
-              </label>
-            )}
+            <span style={{fontSize:'9px',fontFamily:'monospace',color:'#9ca3af'}}>
+              Define cross-sections &amp; zones — used for MCT output and the 🚂 AREMA Rating step
+            </span>
+            <label style={{display:'flex',alignItems:'center',gap:'5px',cursor:'pointer',
+              fontWeight:'600',fontSize:'11px',marginLeft:'auto',
+              color:AS.applyLoss?'#b45309':'#6b7280',
+              background:AS.applyLoss?'#fef3c7':'#f3f4f6',
+              padding:'3px 10px',borderRadius:'5px',border:`1px solid ${AS.applyLoss?'#fcd34d':'#e5e7eb'}`}}>
+              <input type="checkbox" checked={!!AS.applyLoss}
+                onChange={e=>setAS({applyLoss:e.target.checked})}
+                style={{accentColor:'#b45309'}}/>
+              🔍 Apply Section Loss to Rating (As-Inspected)
+            </label>
           </div>
-          {/* Library editor — primary interface */}
-          {enabled&&<AremaLibraryEditor AS={AS} setAS={setAS} totalLen={totalLen} customRolledShapes={cfg.customRolledShapes||{}} isGFS={(cfg.geomMode||'beam')==='gfs'}/>}
-
-        {!enabled&&(
-          <div style={{padding:'14px 18px',background:'#f9fafb',border:'1px dashed #e5e7eb',borderRadius:'6px',
-            fontSize:'11.5px',color:'#9ca3af',textAlign:'center'}}>
-            Enable above to define a built-up railroad girder cross-section.
-            Section properties (Ix, Sx, Aw, ryc) will flow automatically into the
-            <strong> 🚂 AREMA Rating</strong> step in Step 9.
-          </div>
-        )}
+          {/* Library editor — the single section interface */}
+          <AremaLibraryEditor AS={AS} setAS={setAS} totalLen={totalLen} customRolledShapes={cfg.customRolledShapes||{}} isGFS={(cfg.geomMode||'beam')==='gfs'}/>
       </div>
       );
     })()}
@@ -7306,7 +7171,16 @@ function validateModel(cfg){
   } else {
     // ── Single-beam mode ──
     const totalLen=(cfg.spans||[]).reduce((a,b)=>a+b,0);
-    (cfg.sectionZones||[]).forEach((z,i)=>{
+    // Validate the zone array that's ACTUALLY in use. The AREMA Zone Assignments UI
+    // writes to cfg.aremaSection.sectionZones (label/sectionId); the legacy catalog
+    // system used cfg.sectionZones (name). Reading the wrong one produces phantom
+    // warnings from stale data, so prefer the AREMA zones when that system is active.
+    const AS = cfg.aremaSection||{};
+    const usingArema = AS.enabled && AS.zonesEnabled && AS.sectionZones?.length;
+    const zonesToCheck = usingArema
+      ? AS.sectionZones.map(z=>({startX:z.startX, endX:z.endX, name:z.label}))
+      : (cfg.aremaSection?.enabled ? [] : (cfg.sectionZones||[]));
+    zonesToCheck.forEach((z,i)=>{
       const s=+z.startX||0, e=+(z.endX??0);
       if(e<=s+TOL)
         warn('Sections',`Zone ${i+1} ("${z.name||'?'}") has end ≤ start (${s}–${e} ft) — zone is empty`);
@@ -10467,6 +10341,38 @@ function StepResults({ cfg, set, setStep, mctOutput, rows: origRows, setRows, ra
    }
   };
 
+  // ── Organize for Steel-Beam tool — PS-Beam demands + plate-girder transitions ──
+  const exportSteelBeam = () => {
+   try {
+    const ap = _aremaParams;
+    const payload = buildSteelBeamExport({
+      cfg, origRows, nodePositions, isGFS, gfsMember, gfsMembers, span: ap.span,
+    });
+    if(!payload.stations.length){
+      alert('No station data to export.\n\nPaste MIDAS results first'+(isGFS?', and select a GFS member.':'.'));
+      return;
+    }
+    const warns = [...(payload.warnings||[])];
+    if(!payload.section?.zones?.length)
+      warns.push('No section makeup found — enable the AREMA section library (Sections tab) so top flange / web / bottom flange dimensions and transitions can be exported.');
+    if(warns.length){
+      const mustConfirm = warns.some(w=>w.startsWith('LIVE LOAD')||w.startsWith('No section'));
+      const msg = 'Steel-Beam export warnings:\n\n• '+warns.join('\n\n• ') + (mustConfirm?'\n\nExport anyway?':'');
+      if(mustConfirm){ if(!window.confirm(msg)) return; }
+      else { console.warn(msg); }
+    }
+    const memTag = isGFS&&gfsMember ? '_'+gfsMember.replace(/[^A-Za-z0-9]/g,'') : '';
+    const fname = (cfg.projectUser||cfg.projectName||'bridge').replace(/[^A-Za-z0-9]/g,'_')+memTag+'_steelbeam.json';
+    const blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=fname; a.click();
+    URL.revokeObjectURL(url);
+   } catch(err) {
+    console.error('Steel-Beam export failed:',err);
+    alert('Steel-Beam export failed:\n\n'+(err?.message||err)+'\n\n(See console for details.)');
+   }
+  };
+
   // ── handlers ──────────────────────────────────────────────────────────────
   const handleParse = () => {
     setParseErr('');
@@ -10858,6 +10764,12 @@ function StepResults({ cfg, set, setStep, mctOutput, rows: origRows, setRows, ra
               style={{background:'#1d4ed8',border:'1px solid #1d4ed8',borderRadius:'6px',color:'#fff',
                 padding:'7px 14px',cursor:'pointer',fontSize:'12px',fontWeight:'500',whiteSpace:'nowrap'}}>
               🔗 Organize for PS-Beam tool
+            </button>
+            <button onClick={exportSteelBeam}
+              title="Organize for the Steel-Beam tool: same demands as PS-Beam PLUS the welded plate-girder section makeup (top flange, web, bottom flange) and transition stations"
+              style={{background:'#0e7490',border:'1px solid #0e7490',borderRadius:'6px',color:'#fff',
+                padding:'7px 14px',cursor:'pointer',fontSize:'12px',fontWeight:'500',whiteSpace:'nowrap'}}>
+              🔩 Organize for Steel-Beam tool
             </button>
             <button onClick={downloadAllCSV} title="Download all active channels as CSV"
               style={{background:'#fff',border:'1px solid #d1d5db',borderRadius:'6px',color:'#374151',
